@@ -217,54 +217,60 @@ def _distribute_picture_text(page, context, title, content, image_paths):
     # ========== 3. 输入标题 ==========
     print("[3/6] 输入标题...")
     title_entered = False
-    title_locators = [
-        (f'xpath={TITLE_XPATH}', TITLE_XPATH),
-        ('textarea[placeholder*="标题"], input[placeholder*="标题"], [contenteditable="true"][data-placeholder*="标题"]', None),
-        # 兜底: 排除正文/内容占位符的 contenteditable, 避免选中内容框
-        ('#root [contenteditable="true"]:not([data-placeholder*="正文"]):not([data-placeholder*="内容"]):not([data-placeholder*="写"])', None),
-    ]
-    for selector, _d in title_locators:
-        try:
-            loc = editor_page.locator(selector).first
-            loc.wait_for(state="visible", timeout=5000)
-            loc.click(force=True, timeout=5000)
-            time.sleep(0.3)
-            loc.fill("")
-            loc.type(title, delay=30)
-            print(f"  ✓ 已输入标题: {title[:50]}{'...' if len(title) > 50 else ''}")
+
+    # 方式A: JS 原生 setter 输入 (React 受控组件兼容, 首选)
+    try:
+        result = _input_js(editor_page, TITLE_XPATH, title)
+        if result.get("ok"):
+            print(f"  ✓ 已输入标题 (JS, {result.get('type','')}): {title[:50]}{'...' if len(title) > 50 else ''}")
             title_entered = True
-            break
-        except Exception as e:
-            print(f"  ✗ 定位失败({selector[:40]}): {e}")
-            continue
+    except Exception as e:
+        print(f"  ✗ JS 输入标题失败: {e}")
+
+    # 方式B: 常规 fill/type 兜底
+    if not title_entered:
+        title_locators = [
+            (f'xpath={TITLE_XPATH}', TITLE_XPATH),
+            ('textarea[placeholder*="标题"], input[placeholder*="标题"], [contenteditable="true"][data-placeholder*="标题"]', None),
+            # 兜底: 排除正文/内容占位符的 contenteditable, 避免选中内容框
+            ('#root [contenteditable="true"]:not([data-placeholder*="正文"]):not([data-placeholder*="内容"]):not([data-placeholder*="写"])', None),
+        ]
+        for selector, _d in title_locators:
+            try:
+                loc = editor_page.locator(selector).first
+                loc.wait_for(state="visible", timeout=5000)
+                loc.click(force=True, timeout=5000)
+                time.sleep(0.3)
+                try:
+                    loc.fill("")
+                except Exception:
+                    page.keyboard.press("Control+A")
+                    page.keyboard.press("Backspace")
+                loc.type(title, delay=30)
+                print(f"  ✓ 已输入标题 (fill/type): {title[:50]}{'...' if len(title) > 50 else ''}")
+                title_entered = True
+                break
+            except Exception as e:
+                print(f"  ✗ 定位失败({selector[:40]}): {e}")
+                continue
 
     if not title_entered:
+        # 验证是否其实已输入 (JS 可能已生效但抛错)
         try:
-            editor_page.evaluate(
-                """(args) => {
-                    const title = args.title;
+            val = editor_page.evaluate(
+                """(xpath) => {
                     let el = null;
-                    try {
-                        el = document.evaluate(args.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                    } catch (e) {}
-                    if (!el) {
-                        el = document.querySelector('#root [contenteditable="true"][data-placeholder*="标题"], #root [contenteditable="true"]:not([data-placeholder*="正文"]):not([data-placeholder*="内容"])');
-                    }
-                    if (el) {
-                        el.focus();
-                        el.textContent = title;
-                        el.dispatchEvent(new Event('input', {bubbles: true}));
-                        el.dispatchEvent(new Event('change', {bubbles: true}));
-                        return true;
-                    }
-                    return false;
+                    try { el = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch(e) {}
+                    if (!el) return '';
+                    return (el.value !== undefined ? el.value : el.innerText || el.textContent || '').trim();
                 }""",
-                {"xpath": TITLE_XPATH, "title": title},
+                TITLE_XPATH,
             )
-            print("  ✓ 已通过 JS 输入标题")
-            title_entered = True
-        except Exception as e:
-            print(f"  ✗ JS 输入标题失败: {e}")
+            if val:
+                print(f"  ✓ 标题已存在 (值: {val[:50]})")
+                title_entered = True
+        except Exception:
+            pass
 
     if not title_entered:
         raise Exception("输入标题失败: 无法定位标题输入框")
@@ -494,6 +500,55 @@ def _get_content_text(page):
         )
     except Exception:
         return ""
+
+
+def _input_js(page, xpath, text):
+    """
+    用 JS 输入文本, React 受控组件兼容
+
+    - input/textarea: 原生 value setter + input/change 事件 (绕过 React 值劫持)
+    - contenteditable: focus + execCommand insertText (触发 input 事件, 编辑器可识别)
+    返回 {"ok": bool, "type": 元素类型, "value": 输入后值}
+    """
+    return page.evaluate(
+        """(args) => {
+            const xpath = args.xpath, text = args.text;
+            const findEl = () => {
+                try {
+                    let el = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    return el || null;
+                } catch (e) { return null; }
+            };
+            let el = findEl();
+            if (!el) return {ok: false, type: 'none', reason: 'xpath not found'};
+            // 若定位到的是包装层, 尝试在其内部找真正的输入元素
+            if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && !el.isContentEditable) {
+                const inner = el.querySelector('input, textarea, [contenteditable="true"]');
+                if (inner) el = inner;
+            }
+            el.focus();
+            try { el.click(); } catch (e) {}
+
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+                const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                setter.call(el, text);
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+                return {ok: true, type: el.tagName, value: el.value};
+            }
+
+            // contenteditable
+            el.textContent = '';
+            const sel = window.getSelection();
+            sel.selectAllChildren(el);
+            document.execCommand('delete', false, null);
+            document.execCommand('insertText', false, text);
+            el.dispatchEvent(new Event('input', {bubbles: true}));
+            return {ok: true, type: 'contenteditable', value: el.innerText || ''};
+        }""",
+        {"xpath": xpath, "text": text},
+    )
 
 
 def _extract_address(content):
