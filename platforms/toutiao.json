@@ -2,7 +2,7 @@
   "id": "toutiao",
   "name": "今日头条",
   "url": "https://mp.toutiao.com/profile_v4/graphic/publish",
-  "description": "文章分发平台 - 授权后直接进入图文编辑页, 编辑并发布文章到今日头条",
+  "description": "国民级资讯平台，流量大、推荐机制强，适合发布热点解读、行业观察、知识科普类图文内容。",
   "plugin_file": "toutiao.py",
   "created_at": "2026-08-05T10:18:00.000000"
 }

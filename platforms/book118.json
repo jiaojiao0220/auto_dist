@@ -2,7 +2,7 @@
   "id": "book118",
   "name": "原创力文档",
   "url": "https://max.book118.com/user_center_v1/doc/Index/index.html#upload",
-  "description": "文件上传型平台 - 上传Word文档到原创力文档",
+  "description": "文档分享平台，上传 Word 文档按份下载分成，适合发布教程、模板、学习资料等可下载文档。",
   "plugin_file": "book118.py",
   "created_at": "2026-08-04T14:10:00.000000"
 }
