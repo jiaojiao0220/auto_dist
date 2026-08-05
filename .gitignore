@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 浏览器数据 (Playwright 持久化上下文, 含登录态/cookie)
+browser_data/
+
+# 上传的文档
+uploads/
+
+# 日志文件
+*.log
+server.log
+server_run.log
+server_run_new.log
+debug.log
+
+# 调试产物
+debug_screenshot.png
+err.txt
+delete_log_lines*.txt
+
+# WorkBuddy 项目数据
+.workbuddy/
+
+# 系统文件
+.DS_Store
+Thumbs.db

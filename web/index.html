@@ -1,0 +1,1649 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>自动化分发系统</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+<style>
+:root {
+  --primary: #4F46E5;
+  --primary-light: #EEF2FF;
+  --success: #10B981;
+  --success-light: #ECFDF5;
+  --warning: #F59E0B;
+  --warning-light: #FFFBEB;
+  --danger: #EF4444;
+  --danger-light: #FEF2F2;
+  --gray-50: #F9FAFB;
+  --gray-100: #F3F4F6;
+  --gray-200: #E5E7EB;
+  --gray-300: #D1D5DB;
+  --gray-400: #9CA3AF;
+  --gray-500: #6B7280;
+  --gray-600: #4B5563;
+  --gray-700: #374151;
+  --gray-800: #1F2937;
+  --gray-900: #111827;
+  --radius: 10px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 25px rgba(0,0,0,0.1), 0 4px 10px rgba(0,0,0,0.04);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--gray-50);
+  color: var(--gray-900);
+  line-height: 1.6;
+}
+
+/* Header */
+header {
+  background: #fff;
+  border-bottom: 1px solid var(--gray-200);
+  padding: 16px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: var(--shadow);
+}
+header .logo { display: flex; align-items: center; gap: 12px; }
+header .logo-icon {
+  width: 40px; height: 40px;
+  background: linear-gradient(135deg, #4F46E5, #7C3AED);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px;
+}
+header h1 { font-size: 20px; font-weight: 700; }
+header .subtitle { font-size: 13px; color: var(--gray-500); }
+header .header-actions { display: flex; gap: 12px; align-items: center; }
+
+/* Buttons */
+.btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: #4338CA; }
+.btn-success { background: var(--success); color: #fff; }
+.btn-success:hover { background: #059669; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover { background: #DC2626; }
+.btn-outline { background: #fff; border: 1px solid var(--gray-300); color: var(--gray-700); }
+.btn-outline:hover { background: var(--gray-50); border-color: var(--gray-400); }
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-warning { background: var(--warning); color: #fff; }
+
+/* Toggle Switch */
+.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--gray-700);
+  user-select: none;
+}
+.toggle-switch input { display: none; }
+.toggle-slider {
+  width: 36px;
+  height: 20px;
+  background: var(--gray-300);
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.toggle-slider::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--primary);
+}
+.toggle-switch input:checked + .toggle-slider::after {
+  transform: translateX(16px);
+}
+
+/* Main */
+main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+.section-header h2 { font-size: 18px; font-weight: 600; }
+
+/* Platform Grid */
+.platform-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.platform-card {
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: var(--shadow);
+}
+.platform-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+.platform-card .card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.platform-card .platform-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+.platform-card .platform-url {
+  font-size: 13px;
+  color: var(--gray-500);
+  word-break: break-all;
+  margin-bottom: 12px;
+}
+.platform-card .card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.badge-success { background: var(--success-light); color: var(--success); }
+.badge-warning { background: var(--warning-light); color: var(--warning); }
+.badge-danger { background: var(--danger-light); color: var(--danger); }
+.badge-gray { background: var(--gray-100); color: var(--gray-500); }
+.badge-primary { background: var(--primary-light); color: var(--primary); }
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--gray-400);
+}
+.empty-state .icon { font-size: 64px; margin-bottom: 16px; }
+.empty-state p { font-size: 16px; margin-bottom: 8px; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 1000;
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 20px;
+  overflow-y: auto;
+}
+.modal-overlay.active { display: flex; }
+.modal {
+  background: #fff;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 560px;
+  box-shadow: var(--shadow-lg);
+  animation: slideUp 0.2s ease;
+}
+.modal-lg { max-width: 960px; }
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--gray-200);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-header h3 { font-size: 18px; font-weight: 600; }
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: var(--gray-400);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+.modal-close:hover { background: var(--gray-100); color: var(--gray-700); }
+.modal-body { padding: 24px; }
+.modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--gray-200);
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* Form */
+.form-group { margin-bottom: 18px; }
+.form-group label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  color: var(--gray-700);
+}
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--gray-300);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
+}
+
+/* Detail View */
+.detail-section {
+  background: var(--gray-50);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.detail-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.detail-row:last-child { margin-bottom: 0; }
+.detail-label {
+  font-size: 13px;
+  color: var(--gray-500);
+  min-width: 80px;
+}
+.detail-value { font-size: 14px; color: var(--gray-800); word-break: break-all; }
+
+.action-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+/* Code Editor */
+.code-section {
+  margin-top: 16px;
+}
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.code-header h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-700);
+}
+.code-header .hint { font-size: 12px; color: var(--gray-400); }
+.CodeMirror {
+  height: 400px !important;
+  border-radius: 8px;
+  border: 1px solid var(--gray-200);
+  font-size: 13px;
+}
+
+/* Content textarea */
+.content-input {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px 14px;
+  border: 1px solid var(--gray-300);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 2000;
+  animation: slideIn 0.2s ease;
+  box-shadow: var(--shadow-lg);
+  max-width: 400px;
+}
+.toast-success { background: var(--success); color: #fff; }
+.toast-error { background: var(--danger); color: #fff; }
+.toast-info { background: var(--gray-800); color: #fff; }
+.toast-warning { background: var(--warning); color: #fff; }
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* Error display */
+.error-box {
+  background: var(--danger-light);
+  border: 1px solid #FCA5A5;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--danger);
+  margin-top: 12px;
+  white-space: pre-wrap;
+  font-family: "Consolas", "Monaco", monospace;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Loading spinner */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Description in card */
+.platform-desc {
+  font-size: 13px;
+  color: var(--gray-500);
+  margin-bottom: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Document list */
+.doc-list {
+  margin-top: 12px;
+}
+.doc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: #fff;
+  transition: all 0.15s;
+}
+.doc-item:hover { border-color: var(--primary); }
+.doc-item .doc-info { flex: 1; min-width: 0; }
+.doc-item .doc-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--gray-800);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.doc-item .doc-filename {
+  font-size: 12px;
+  color: var(--gray-400);
+}
+.doc-item .doc-status {
+  font-size: 12px;
+  margin-left: 8px;
+}
+.doc-item .doc-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: 12px;
+  flex-shrink: 0;
+}
+.doc-empty {
+  text-align: center;
+  padding: 20px;
+  color: var(--gray-400);
+  font-size: 13px;
+}
+
+/* Section divider */
+.section-divider {
+  border: none;
+  border-top: 1px solid var(--gray-200);
+  margin: 20px 0;
+}
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-700);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* File upload area */
+.file-upload-area {
+  border: 2px dashed var(--gray-300);
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: 12px;
+}
+.file-upload-area:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.file-upload-area .upload-icon { font-size: 32px; }
+.file-upload-area .upload-text {
+  font-size: 14px;
+  color: var(--gray-600);
+  margin-top: 4px;
+}
+.file-upload-area .upload-hint {
+  font-size: 12px;
+  color: var(--gray-400);
+}
+
+/* Log Panel */
+.log-panel {
+  background: #1e1e2e;
+  border-radius: 8px;
+  border: 1px solid #313244;
+  margin-top: 16px;
+  overflow: hidden;
+  position: relative;
+}
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+}
+.log-header .log-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cdd6f4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.log-header .log-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.log-header .log-count {
+  font-size: 11px;
+  color: #6c7086;
+}
+.log-clear-btn {
+  background: none;
+  border: 1px solid #45475a;
+  color: #a6adc8;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.log-clear-btn:hover { background: #45475a; color: #cdd6f4; }
+.log-body {
+  height: 280px;
+  overflow-y: auto;
+  padding: 8px 14px;
+  font-family: "Consolas", "Monaco", "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.log-body::-webkit-scrollbar { width: 6px; }
+.log-body::-webkit-scrollbar-track { background: #1e1e2e; }
+.log-body::-webkit-scrollbar-thumb { background: #45475a; border-radius: 3px; }
+.log-line {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+  word-break: break-word;
+}
+.log-time {
+  color: #6c7086;
+  flex-shrink: 0;
+  font-size: 11px;
+  padding-top: 1px;
+}
+.log-msg { color: #cdd6f4; white-space: pre-wrap; }
+.log-line.log-info .log-msg { color: #cdd6f4; }
+.log-line.log-success .log-msg { color: #a6e3a1; }
+.log-line.log-error .log-msg { color: #f38ba8; }
+.log-line.log-warning .log-msg { color: #f9e2af; }
+.log-empty {
+  color: #6c7086;
+  text-align: center;
+  padding: 40px 0;
+  font-size: 13px;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🚀</div>
+    <div>
+      <h1>自动化分发系统</h1>
+      <div class="subtitle">多平台授权管理 · 浏览器自动化 · 自定义插件</div>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-primary" onclick="showAddModal()">+ 添加平台</button>
+  </div>
+</header>
+
+<main>
+  <div class="section-header">
+    <h2>平台列表</h2>
+    <span id="platform-count" style="font-size:14px;color:var(--gray-500);"></span>
+  </div>
+  <div id="platform-grid" class="platform-grid">
+    <!-- 平台卡片 -->
+  </div>
+  <div id="empty-state" class="empty-state" style="display:none;">
+    <div class="icon">📦</div>
+    <p>还没有添加任何平台</p>
+    <p style="font-size:14px;">点击右上角"添加平台"开始</p>
+  </div>
+</main>
+
+<!-- 添加平台弹窗 -->
+<div class="modal-overlay" id="add-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>添加平台</h3>
+      <button class="modal-close" onclick="closeModal('add-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>平台名称</label>
+        <input type="text" id="add-name" placeholder="如：知乎、微博、小红书" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>平台网址</label>
+        <input type="text" id="add-url" placeholder="https://www.example.com" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>描述 (可选)</label>
+        <textarea id="add-desc" rows="2" placeholder="简要描述这个平台的用途"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('add-modal')">取消</button>
+      <button class="btn btn-primary" onclick="createPlatform()">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- 平台详情弹窗 -->
+<div class="modal-overlay" id="detail-modal">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3 id="detail-title">平台详情</h3>
+      <button class="modal-close" onclick="closeModal('detail-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <!-- 基本信息 -->
+      <div class="detail-section">
+        <div class="detail-row">
+          <span class="detail-label">网址</span>
+          <span class="detail-value" id="detail-url"></span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">状态</span>
+          <span id="detail-status"></span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">描述</span>
+          <span class="detail-value" id="detail-desc"></span>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="action-bar">
+        <button class="btn btn-primary btn-sm" id="btn-open" onclick="openBrowser()">🌐 打开浏览器</button>
+        <button class="btn btn-outline btn-sm" id="btn-close" onclick="closeBrowser()" style="display:none;">🔒 关闭浏览器</button>
+        <button class="btn btn-outline btn-sm" id="btn-check-auth" onclick="checkAuth()">🔍 检查授权</button>
+        <button class="btn btn-success btn-sm" onclick="runLogin()">🔑 执行登录</button>
+        <button class="btn btn-outline btn-sm" onclick="reloadPlugin()">🔄 重载插件</button>
+        <button class="btn btn-danger btn-sm" onclick="deletePlatform()">🗑 删除平台</button>
+        <label class="toggle-switch" title="开启后浏览器在后台运行，不显示窗口">
+          <input type="checkbox" id="headless-toggle" onchange="toggleHeadless()">
+          <span class="toggle-slider"></span>
+          <span>无头模式</span>
+        </label>
+        <button class="btn btn-success btn-sm" id="btn-distribute-all" onclick="distributeAll()">⚡ 一键分发</button>
+      </div>
+
+      <!-- 文档分发区 -->
+      <div class="section-title">📄 文档分发</div>
+      <div class="file-upload-area" onclick="document.getElementById('doc-file-input').click()">
+        <div class="upload-icon">📁</div>
+        <div class="upload-text">点击选择 Word 文档 (.docx)</div>
+        <div class="upload-hint">支持多选，第一段为标题，其余为内容（含图片）</div>
+      </div>
+      <input type="file" id="doc-file-input" accept=".docx" multiple style="display:none;" onchange="handleFileSelect(event)">
+      <div id="doc-list" class="doc-list">
+        <div class="doc-empty">未选择文档</div>
+      </div>
+
+      <!-- 手动分发 -->
+      <hr class="section-divider">
+      <div class="section-title">✏️ 手动输入分发</div>
+      <div class="form-group">
+        <label>标题 (可选，留空则只传 content)</label>
+        <input type="text" id="distribute-title" placeholder="输入标题..." autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>分发内容 (传递给 distribute 函数的 content 参数)</label>
+        <textarea class="content-input" id="distribute-content" placeholder="输入要分发的内容..."></textarea>
+      </div>
+      <div style="margin-bottom:16px;">
+        <button class="btn btn-success btn-sm" onclick="runDistribute()">📤 执行分发</button>
+      </div>
+
+      <!-- 错误显示 -->
+      <div id="error-display"></div>
+
+      <!-- 日志面板 -->
+      <div class="log-panel">
+        <div class="log-header">
+          <span class="log-title">📋 执行日志</span>
+          <div class="log-actions">
+            <span class="log-count" id="log-count">0 条</span>
+            <button class="log-clear-btn" onclick="clearLogs()">清空</button>
+          </div>
+        </div>
+        <div class="log-body" id="log-body">
+          <div class="log-empty">暂无日志，执行操作后此处会实时显示</div>
+        </div>
+        <div id="log-scroll-hint" style="display:none;position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:4px 14px;border-radius:14px;font-size:12px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;" onclick="scrollLogToBottom()">↓ 新日志，点击回到底部</div>
+      </div>
+
+      <!-- 代码编辑器 -->
+      <div class="code-section">
+        <div class="code-header">
+          <h4>自动化插件代码 (Python)</h4>
+          <span class="hint">保存后可热重载，无需重启浏览器</span>
+        </div>
+        <textarea id="code-editor"></textarea>
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+          <button class="btn btn-primary btn-sm" onclick="savePlugin()">💾 保存代码</button>
+          <button class="btn btn-outline btn-sm" onclick="resetPlugin()">↩ 重置为模板</button>
+          <span id="save-status" style="font-size:13px;color:var(--gray-400);"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script>
+// ========== 全局状态 ==========
+let currentPlatform = null;
+let codeEditor = null;
+let statusTimer = null;
+let parsedDocs = []; // 解析后的文档列表
+let logFetchTimer = null;
+let logState = {}; // 每个平台的日志增量状态: { offset: 已拉取条数, lines: 已缓存日志行 } —— 跨打开累积，只拉新增
+let headlessMode = false; // 无头浏览器模式
+let logAutoScroll = true; // 日志自动滚动开关（用户上滑时暂停）
+
+// ========== 初始化 ==========
+document.addEventListener('DOMContentLoaded', () => {
+  initCodeEditor();
+  loadPlatforms();
+  statusTimer = setInterval(refreshStatus, 5000);
+});
+
+function initCodeEditor() {
+  codeEditor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+    mode: 'python',
+    theme: 'material-darker',
+    lineNumbers: true,
+    indentUnit: 4,
+    tabSize: 4,
+    smartIndent: true,
+    lineWrapping: false,
+  });
+}
+
+// ========== API 调用 ==========
+async function api(url, options = {}) {
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const errMsg = data.detail || data.error || `请求失败 (${res.status})`;
+    throw new Error(errMsg);
+  }
+  return data;
+}
+
+// ========== 平台列表 ==========
+async function loadPlatforms() {
+  try {
+    const platforms = await api('/api/platforms');
+    renderPlatforms(platforms);
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+function renderPlatforms(platforms) {
+  const grid = document.getElementById('platform-grid');
+  const empty = document.getElementById('empty-state');
+  const count = document.getElementById('platform-count');
+
+  count.textContent = platforms.length > 0 ? `共 ${platforms.length} 个平台` : '';
+
+  if (platforms.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  grid.innerHTML = platforms.map(p => {
+    const statusBadge = getStatusBadge(p);
+    const openBtnText = p.browser_open ? '🔒 关闭' : '🌐 打开';
+    const openBtnAction = p.browser_open
+      ? `event.stopPropagation();closeBrowserById('${p.id}')`
+      : `event.stopPropagation();openBrowserById('${p.id}')`;
+    return `
+      <div class="platform-card" onclick="showDetail('${p.id}')">
+        <div class="card-header">
+          <span class="platform-name">${escapeHtml(p.name)}</span>
+          ${statusBadge}
+        </div>
+        <div class="platform-url">${escapeHtml(p.url)}</div>
+        ${p.description ? `<div class="platform-desc">${escapeHtml(p.description)}</div>` : ''}
+        <div class="card-actions">
+          <button class="btn btn-primary btn-sm" onclick="${openBtnAction}">${openBtnText}</button>
+          <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showDetail('${p.id}')">编辑</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function getStatusBadge(p) {
+  if (p.browser_open) {
+    if (p.auth_status === true) return '<span class="badge badge-success">✓ 已授权</span>';
+    if (p.auth_status === false) return '<span class="badge badge-warning">⚠ 未授权</span>';
+    return '<span class="badge badge-primary">运行中</span>';
+  }
+  return '<span class="badge badge-gray">未打开</span>';
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+// ========== 添加平台 ==========
+function showAddModal() {
+  document.getElementById('add-name').value = '';
+  document.getElementById('add-url').value = '';
+  document.getElementById('add-desc').value = '';
+  openModal('add-modal');
+  setTimeout(() => document.getElementById('add-name').focus(), 100);
+}
+
+async function createPlatform() {
+  const name = document.getElementById('add-name').value.trim();
+  const url = document.getElementById('add-url').value.trim();
+  const desc = document.getElementById('add-desc').value.trim();
+
+  if (!name) { showToast('请输入平台名称', 'error'); return; }
+  if (!url) { showToast('请输入平台网址', 'error'); return; }
+
+  try {
+    await api('/api/platforms', {
+      method: 'POST',
+      body: JSON.stringify({ name, url, description: desc }),
+    });
+    closeModal('add-modal');
+    showToast(`平台 "${name}" 创建成功`, 'success');
+    loadPlatforms();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+// ========== 平台详情 ==========
+async function showDetail(platformId) {
+  try {
+    const platforms = await api('/api/platforms');
+    const p = platforms.find(x => x.id === platformId);
+    if (!p) { showToast('平台不存在', 'error'); return; }
+
+    currentPlatform = p;
+    parsedDocs = []; // 重置文档列表
+    document.getElementById('detail-title').textContent = p.name;
+    document.getElementById('detail-url').textContent = p.url;
+    document.getElementById('detail-desc').textContent = p.description || '无';
+    updateDetailStatus(p);
+
+    // 加载插件代码
+    const plugin = await api(`/api/platforms/${p.id}/plugin`);
+    codeEditor.setValue(plugin.code || '');
+    setTimeout(() => codeEditor.refresh(), 100);
+
+    // 重置文档列表
+    renderDocList();
+    document.getElementById('error-display').innerHTML = '';
+    document.getElementById('distribute-title').value = '';
+    document.getElementById('distribute-content').value = '';
+    openModal('detail-modal');
+    // 启动日志轮询
+    startLogPolling();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+function updateDetailStatus(p) {
+  const el = document.getElementById('detail-status');
+  if (p.browser_open) {
+    if (p.auth_status === true) {
+      el.innerHTML = '<span class="badge badge-success">✓ 已授权</span>';
+    } else if (p.auth_status === false) {
+      el.innerHTML = '<span class="badge badge-warning">⚠ 未授权</span>';
+    } else {
+      el.innerHTML = '<span class="badge badge-primary">运行中</span>';
+    }
+    document.getElementById('btn-open').style.display = 'none';
+    document.getElementById('btn-close').style.display = 'inline-flex';
+  } else {
+    el.innerHTML = '<span class="badge badge-gray">未打开</span>';
+    document.getElementById('btn-open').style.display = 'inline-flex';
+    document.getElementById('btn-close').style.display = 'none';
+  }
+}
+
+// ========== 浏览器操作 ==========
+function toggleHeadless() {
+  headlessMode = document.getElementById('headless-toggle').checked;
+  if (headlessMode) {
+    showToast('已开启无头模式，浏览器将在后台运行（需重新打开浏览器生效）', 'info');
+  } else {
+    showToast('已关闭无头模式，浏览器将显示窗口（需重新打开浏览器生效）', 'info');
+  }
+}
+
+async function openBrowserById(platformId) {
+  showToast('正在打开浏览器...', 'info');
+  try {
+    const result = await api(`/api/platforms/${platformId}/open`, {
+      method: 'POST',
+      body: JSON.stringify({ headless: headlessMode }),
+    });
+    if (result.auth_status === true) {
+      showToast('浏览器已打开，已授权登录', 'success');
+    } else if (result.auth_status === false) {
+      showToast('浏览器已打开，需要登录', 'warning');
+    } else {
+      showToast('浏览器已打开', 'success');
+    }
+    loadPlatforms();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function openBrowser() {
+  if (currentPlatform) await openBrowserById(currentPlatform.id);
+  if (currentPlatform) {
+    setTimeout(async () => {
+      const platforms = await api('/api/platforms');
+      const p = platforms.find(x => x.id === currentPlatform.id);
+      if (p) { currentPlatform = p; updateDetailStatus(p); }
+    }, 1000);
+  }
+}
+
+async function closeBrowserById(platformId) {
+  try {
+    await api(`/api/platforms/${platformId}/close`, { method: 'POST' });
+    showToast('浏览器已关闭，登录状态已保存', 'success');
+    loadPlatforms();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function closeBrowser() {
+  if (!currentPlatform) return;
+  await closeBrowserById(currentPlatform.id);
+  const platforms = await api('/api/platforms');
+  const p = platforms.find(x => x.id === currentPlatform.id);
+  if (p) { currentPlatform = p; updateDetailStatus(p); }
+}
+
+// ========== 检查授权 (修复版) ==========
+async function checkAuth() {
+  if (!currentPlatform) return;
+
+  // 先刷新一下状态
+  try {
+    const platforms = await api('/api/platforms');
+    const p = platforms.find(x => x.id === currentPlatform.id);
+    if (p) { currentPlatform = p; updateDetailStatus(p); }
+  } catch (e) { /* ignore */ }
+
+  if (!currentPlatform.browser_open) {
+    showToast('请先打开浏览器', 'warning');
+    return;
+  }
+
+  const btn = document.getElementById('btn-check-auth');
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+
+  // 自动重试最多 3 次
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    btn.innerHTML = `<span class="spinner"></span> 检查中 (${attempt}/3)...`;
+    try {
+      const result = await api(`/api/platforms/${currentPlatform.id}/run`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'is_logged_in' }),
+      });
+      const loggedIn = result.result;
+      if (loggedIn === true) {
+        showToast('✓ 已登录，授权有效', 'success');
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+        // 刷新状态
+        try {
+          const platforms = await api('/api/platforms');
+          const p = platforms.find(x => x.id === currentPlatform.id);
+          if (p) { currentPlatform = p; updateDetailStatus(p); }
+          renderPlatforms(platforms);
+        } catch (e) { /* ignore */ }
+        return;
+      } else if (loggedIn === false) {
+        // 明确未登录，不需要重试
+        showToast('⚠ 未登录或授权已过期', 'warning');
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+        try {
+          const platforms = await api('/api/platforms');
+          const p = platforms.find(x => x.id === currentPlatform.id);
+          if (p) { currentPlatform = p; updateDetailStatus(p); }
+          renderPlatforms(platforms);
+        } catch (e) { /* ignore */ }
+        return;
+      } else {
+        // 返回 None/未知，重试
+        if (attempt < 3) {
+          showToast(`登录状态未知，${attempt < 3 ? '正在重试...' : ''}`, 'info');
+          await new Promise(r => setTimeout(r, 1500));
+        } else {
+          showToast('登录状态未知（3次尝试后仍无法确定）', 'info');
+        }
+      }
+    } catch (e) {
+      lastError = e;
+      if (attempt < 3) {
+        showToast(`检查失败，正在重试 (${attempt}/3)...`, 'info');
+        await new Promise(r => setTimeout(r, 1500));
+      } else {
+        showError(e.message);
+        showToast('检查授权失败: ' + e.message.substring(0, 100), 'error');
+      }
+    }
+  }
+
+  btn.innerHTML = originalText;
+  btn.disabled = false;
+}
+
+async function runLogin() {
+  if (!currentPlatform) return;
+  if (!currentPlatform.browser_open) {
+    showToast('请先打开浏览器', 'warning');
+    return;
+  }
+  showToast('正在执行登录流程...', 'info');
+  try {
+    const result = await api(`/api/platforms/${currentPlatform.id}/run`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'login' }),
+    });
+    showToast('登录流程执行完成', 'success');
+    loadPlatforms();
+  } catch (e) {
+    showError(e.message);
+    showToast('登录失败: ' + e.message.substring(0, 100), 'error');
+  }
+}
+
+// ========== 文档上传与解析 ==========
+async function handleFileSelect(event) {
+  const files = event.target.files;
+  if (!files.length) return;
+
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append('files', file);
+  }
+
+  showToast('正在解析文档...', 'info');
+  try {
+    const res = await fetch('/api/upload-docs', {
+      method: 'POST',
+      body: formData,
+    });
+    const docs = await res.json();
+    if (!res.ok) {
+      throw new Error(docs.detail || docs.error || '解析失败');
+    }
+
+    // 合并到已解析列表
+    for (const doc of docs) {
+      if (doc.error) {
+        showToast(`${doc.filename}: ${doc.error}`, 'error');
+      } else {
+        parsedDocs.push({ ...doc, status: 'pending' });
+      }
+    }
+    renderDocList();
+    showToast(`已解析 ${parsedDocs.length} 个文档`, 'success');
+  } catch (e) {
+    showToast('文档解析失败: ' + e.message, 'error');
+  }
+  // Reset input so same file can be selected again
+  event.target.value = '';
+}
+
+function renderDocList() {
+  const container = document.getElementById('doc-list');
+  if (parsedDocs.length === 0) {
+    container.innerHTML = '<div class="doc-empty">未选择文档</div>';
+    return;
+  }
+
+  container.innerHTML = parsedDocs.map((doc, index) => {
+    let statusBadge = '';
+    if (doc.status === 'distributing') {
+      statusBadge = '<span class="badge badge-primary"><span class="spinner"></span> 分发中</span>';
+    } else if (doc.status === 'success') {
+      statusBadge = '<span class="badge badge-success">✓ 成功</span>';
+    } else if (doc.status === 'error') {
+      statusBadge = '<span class="badge badge-danger">✗ 失败</span>';
+    } else {
+      statusBadge = '<span class="badge badge-gray">待分发</span>';
+    }
+
+    return `
+      <div class="doc-item">
+        <div class="doc-info">
+          <div class="doc-title">${escapeHtml(doc.title)}</div>
+          <div class="doc-filename">${escapeHtml(doc.filename)}</div>
+        </div>
+        <div class="doc-status">${statusBadge}</div>
+        <div class="doc-actions">
+          <button class="btn btn-success btn-sm" onclick="distributeDoc(${index})" ${doc.status === 'distributing' ? 'disabled' : ''}>📤 分发</button>
+          <button class="btn btn-outline btn-sm" onclick="removeDoc(${index})">✕</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function removeDoc(index) {
+  parsedDocs.splice(index, 1);
+  renderDocList();
+}
+
+async function distributeDoc(index) {
+  if (!currentPlatform) return;
+
+  const doc = parsedDocs[index];
+  doc.status = 'distributing';
+  renderDocList();
+
+  // 清空该平台日志缓存, 避免与历史分发记录堆叠
+  await resetLogForPlatform(currentPlatform.id);
+
+  showToast(`正在分发: ${doc.title}`, 'info');
+  try {
+    const payload = {
+      action: 'distribute',
+      title: doc.title,
+      content: doc.html_content,
+      file_path: doc.file_path || null,
+      headless: headlessMode,
+    };
+    const result = await api(`/api/platforms/${currentPlatform.id}/run`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    doc.status = 'success';
+    showToast(`✓ 分发成功: ${doc.title}`, 'success');
+  } catch (e) {
+    doc.status = 'error';
+    doc.error = e.message;
+    showError(e.message);
+    showToast(`✗ 分发失败: ${doc.title}`, 'error');
+  }
+  renderDocList();
+}
+
+// ========== 一键分发 (批量) ==========
+async function distributeAll() {
+  if (!currentPlatform) return;
+
+  // 检查是否有文档
+  if (parsedDocs.length === 0) {
+    showToast('请先上传文档', 'warning');
+    return;
+  }
+
+  // 检查未分发的文档
+  const pendingDocsRaw = parsedDocs.filter(d => d.status === 'pending' || d.status === 'error');
+  if (pendingDocsRaw.length === 0) {
+    showToast('所有文档已分发成功', 'info');
+    return;
+  }
+
+  // 去重: 同一标题(或同一文件)的 pending 文档只分发一次, 避免同一篇文章被反复分发
+  const seenKeys = new Set();
+  const pendingDocs = pendingDocsRaw.filter(d => {
+    const key = (d.title || '').trim() || d.file_path || '';
+    if (seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    return true;
+  });
+  const dupCount = pendingDocsRaw.length - pendingDocs.length;
+  if (dupCount > 0) {
+    showToast(`已跳过 ${dupCount} 个重复文档`, 'info');
+  }
+
+  // 清空该平台日志缓存 (前端 + 后端), 避免历史分发记录堆叠刷屏
+  await resetLogForPlatform(currentPlatform.id);
+
+  const btn = document.getElementById('btn-distribute-all');
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+
+  // 如果浏览器未打开，先打开
+  if (!currentPlatform.browser_open) {
+    btn.innerHTML = '<span class="spinner"></span> 打开浏览器中...';
+    showToast(headlessMode ? '正在打开浏览器 (无头模式)...' : '正在打开浏览器...', 'info');
+    try {
+      await api(`/api/platforms/${currentPlatform.id}/open`, {
+        method: 'POST',
+        body: JSON.stringify({ headless: headlessMode }),
+      });
+      // 刷新状态
+      const platforms = await api('/api/platforms');
+      const p = platforms.find(x => x.id === currentPlatform.id);
+      if (p) { currentPlatform = p; updateDetailStatus(p); }
+      renderPlatforms(platforms);
+    } catch (e) {
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+      showToast('打开浏览器失败: ' + e.message.substring(0, 100), 'error');
+      return;
+    }
+    // 等待浏览器完全就绪
+    await new Promise(r => setTimeout(r, 3000));
+  }
+
+  let successCount = 0;
+  let failCount = 0;
+  const total = pendingDocs.length;
+
+  for (let i = 0; i < pendingDocs.length; i++) {
+    const doc = pendingDocs[i];
+    const docIndex = parsedDocs.indexOf(doc);
+    const progress = `(${i + 1}/${total})`;
+
+    btn.innerHTML = `<span class="spinner"></span> 分发中 ${progress}`;
+    showToast(`${progress} 正在分发: ${doc.title}`, 'info');
+
+    doc.status = 'distributing';
+    renderDocList();
+
+    try {
+      const payload = {
+        action: 'distribute',
+        title: doc.title,
+        content: doc.html_content,
+        file_path: doc.file_path || null,
+        headless: headlessMode,
+      };
+      await api(`/api/platforms/${currentPlatform.id}/run`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      doc.status = 'success';
+      successCount++;
+      showToast(`${progress} ✓ 分发成功: ${doc.title}`, 'success');
+    } catch (e) {
+      doc.status = 'error';
+      doc.error = e.message;
+      failCount++;
+      showError(e.message);
+      showToast(`${progress} ✗ 分发失败: ${doc.title}`, 'error');
+    }
+
+    renderDocList();
+
+    // 文档之间间隔等待，让页面有时间回到可操作状态
+    if (i < pendingDocs.length - 1) {
+      showToast(`${progress} 等待页面就绪后继续下一篇...`, 'info');
+      await new Promise(r => setTimeout(r, 5000));
+    }
+  }
+
+  btn.innerHTML = originalText;
+  btn.disabled = false;
+
+  // 最终汇总
+  if (failCount === 0) {
+    showToast(`🎉 全部完成！成功分发 ${successCount} 篇文档`, 'success');
+  } else {
+    showToast(`分发完成: ${successCount} 成功, ${failCount} 失败`, 'warning');
+  }
+
+  // 刷新平台状态
+  loadPlatforms();
+}
+
+// ========== 手动分发 ==========
+async function runDistribute() {
+  if (!currentPlatform) return;
+  if (!currentPlatform.browser_open) {
+    showToast('请先打开浏览器', 'warning');
+    return;
+  }
+  const content = document.getElementById('distribute-content').value;
+  const title = document.getElementById('distribute-title').value;
+  if (!content.trim()) {
+    showToast('请输入分发内容', 'warning');
+    return;
+  }
+  // 清空该平台日志缓存, 避免与历史分发记录堆叠
+  await resetLogForPlatform(currentPlatform.id);
+  showToast('正在执行分发...', 'info');
+  try {
+    const result = await api(`/api/platforms/${currentPlatform.id}/run`, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'distribute',
+        content,
+        title: title || undefined,
+      }),
+    });
+    showToast('分发执行完成', 'success');
+  } catch (e) {
+    showError(e.message);
+    showToast('分发失败: ' + e.message.substring(0, 100), 'error');
+  }
+}
+
+// ========== 插件操作 ==========
+async function savePlugin() {
+  if (!currentPlatform) return;
+  const code = codeEditor.getValue();
+  try {
+    const result = await api(`/api/platforms/${currentPlatform.id}/plugin`, {
+      method: 'PUT',
+      body: JSON.stringify({ code }),
+    });
+    document.getElementById('save-status').textContent = '已保存';
+    setTimeout(() => { document.getElementById('save-status').textContent = ''; }, 3000);
+    showToast(result.message || '代码已保存', 'success');
+    if (result.reload_result) {
+      loadPlatforms();
+    }
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function resetPlugin() {
+  if (!currentPlatform) return;
+  if (!confirm('确定要重置为默认模板吗？当前代码将丢失。')) return;
+  const template = generateTemplate(currentPlatform.name, currentPlatform.url);
+  codeEditor.setValue(template);
+  setTimeout(() => codeEditor.refresh(), 100);
+  showToast('已重置为模板，请保存', 'info');
+}
+
+function generateTemplate(name, url) {
+  return `# ${name} 自动化插件
+#
+# 可用函数 (均为可选, 按需实现):
+#
+# on_open(page, context)         - 浏览器打开时调用, 通常用于导航到页面
+# is_logged_in(page)             - 检查是否已登录, 返回 True / False
+# login(page, context)           - 自动登录流程
+# distribute(page, title, content) - 分发内容到平台
+# on_close(page, context)        - 浏览器关闭时调用
+#
+# page: Playwright Page 对象    https://playwright.dev/python/docs/api/class-page
+# context: Playwright BrowserContext 对象
+# title: 字符串, 文档标题 (手动分发时可能为 None)
+# content: 字符串, HTML内容 (从Word解析) 或纯文本 (手动输入)
+
+
+def on_open(page, context):
+    """浏览器打开时调用"""
+    page.goto("${url}")
+
+
+def is_logged_in(page):
+    """检查是否已登录, 返回 True 或 False"""
+    # TODO: 根据平台实际特征判断登录状态
+    return False
+
+
+def login(page, context):
+    """自动登录流程 (留空则需用户手动登录)"""
+    pass
+
+
+def distribute(page, title, content):
+    """分发内容到平台
+    title: 文章标题
+    content: HTML内容 (含图片) 或纯文本
+    """
+    pass
+`;
+}
+
+async function reloadPlugin() {
+  if (!currentPlatform) return;
+  if (!currentPlatform.browser_open) {
+    showToast('浏览器未打开，无需重载', 'info');
+    return;
+  }
+  try {
+    await api(`/api/platforms/${currentPlatform.id}/reload`, { method: 'POST' });
+    showToast('插件已热重载', 'success');
+    loadPlatforms();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+// ========== 删除平台 ==========
+async function deletePlatform() {
+  if (!currentPlatform) return;
+  if (!confirm(`确定要删除平台 "${currentPlatform.name}" 吗？\n\n将删除：平台配置、插件代码、浏览器数据（含登录状态）`)) return;
+  try {
+    await api(`/api/platforms/${currentPlatform.id}`, { method: 'DELETE' });
+    closeModal('detail-modal');
+    showToast('平台已删除', 'success');
+    loadPlatforms();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+// ========== 状态刷新 ==========
+async function refreshStatus() {
+  try {
+    const platforms = await api('/api/platforms');
+    renderPlatforms(platforms);
+    if (currentPlatform && document.getElementById('detail-modal').classList.contains('active')) {
+      const p = platforms.find(x => x.id === currentPlatform.id);
+      if (p) { currentPlatform = p; updateDetailStatus(p); }
+    }
+  } catch (e) {
+    // 静默失败
+  }
+}
+
+// ========== 工具函数 ==========
+function openModal(id) {
+  document.getElementById(id).classList.add('active');
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('active');
+  if (id === 'detail-modal') stopLogPolling();
+}
+
+let toastTimer = null;
+function showToast(msg, type = 'info') {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  if (toastTimer) clearTimeout(toastTimer);
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  toastTimer = setTimeout(() => toast.remove(), 5000);
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-display');
+  el.innerHTML = `<div class="error-box">${escapeHtml(msg)}</div>`;
+}
+
+// ========== 日志系统 ==========
+function startLogPolling() {
+  stopLogPolling();
+  logAutoScroll = true;
+  const pid = currentPlatform.id;
+  if (!logState[pid]) logState[pid] = { offset: 0, lines: [] };
+  // 增量：复用已缓存的日志（跨打开累积），不再重置为 0 重新拉取全部
+  renderLogs(logState[pid].lines);
+  fetchLogs();
+  logFetchTimer = setInterval(fetchLogs, 1000);
+
+  // 监听日志面板滚动：用户往上滑时暂停自动滚动，滑回底部时恢复
+  const body = document.getElementById('log-body');
+  if (body && !body._scrollListenerAdded) {
+    body._scrollListenerAdded = true;
+    body.addEventListener('scroll', () => {
+      const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+      logAutoScroll = atBottom;
+      // 更新底部提示
+      const hint = document.getElementById('log-scroll-hint');
+      if (hint) hint.style.display = atBottom ? 'none' : 'block';
+    });
+  }
+}
+
+function stopLogPolling() {
+  if (logFetchTimer) {
+    clearInterval(logFetchTimer);
+    logFetchTimer = null;
+  }
+}
+
+async function fetchLogs() {
+  if (!currentPlatform) return;
+  const pid = currentPlatform.id;
+  if (!logState[pid]) logState[pid] = { offset: 0, lines: [] };
+  try {
+    const res = await fetch(`/api/platforms/${pid}/logs?after=${logState[pid].offset}`);
+    const data = await res.json();
+    if (data.logs && data.logs.length > 0) {
+      appendLogs(data.logs);
+      logState[pid].lines.push(...data.logs);
+      // 上限保护，避免长期累积占用过多内存
+      if (logState[pid].lines.length > 1000) logState[pid].lines = logState[pid].lines.slice(-1000);
+      logState[pid].offset += data.logs.length;
+    }
+  } catch (e) {
+    // 静默失败
+  }
+}
+
+function renderLogs(logs) {
+  const body = document.getElementById('log-body');
+  const countEl = document.getElementById('log-count');
+  if (logs.length === 0) {
+    body.innerHTML = '<div class="log-empty">暂无日志，执行操作后此处会实时显示</div>';
+    countEl.textContent = '0 条';
+    return;
+  }
+  body.innerHTML = logs.map(l => formatLogLine(l)).join('');
+  countEl.textContent = `${logs.length} 条`;
+  if (logAutoScroll) body.scrollTop = body.scrollHeight;
+}
+
+function appendLogs(newLogs) {
+  const body = document.getElementById('log-body');
+  const countEl = document.getElementById('log-count');
+
+  // 移除空状态提示
+  const empty = body.querySelector('.log-empty');
+  if (empty) empty.remove();
+
+  // 追加新日志
+  for (const l of newLogs) {
+    const div = document.createElement('div');
+    div.className = `log-line log-${l.level || 'info'}`;
+    div.innerHTML = `<span class="log-time">${l.time || ''}</span><span class="log-msg">${escapeHtml(l.msg || '')}</span>`;
+    body.appendChild(div);
+  }
+
+  // 更新计数
+  const total = body.querySelectorAll('.log-line').length;
+  countEl.textContent = `${total} 条`;
+
+  // 仅在用户处于底部时自动滚动
+  if (logAutoScroll) {
+    body.scrollTop = body.scrollHeight;
+  }
+}
+
+function formatLogLine(l) {
+  return `<div class="log-line log-${l.level || 'info'}"><span class="log-time">${l.time || ''}</span><span class="log-msg">${escapeHtml(l.msg || '')}</span></div>`;
+}
+
+function scrollLogToBottom() {
+  const body = document.getElementById('log-body');
+  if (!body) return;
+  body.scrollTop = body.scrollHeight;
+  logAutoScroll = true;
+  const hint = document.getElementById('log-scroll-hint');
+  if (hint) hint.style.display = 'none';
+}
+
+async function clearLogs() {
+  if (!currentPlatform) return;
+  // 清空当前平台的日志缓存与显示
+  logState[currentPlatform.id] = { offset: 0, lines: [] };
+  renderLogs([]);
+}
+
+// 开始新一轮分发前: 重置前端缓存 + 清空后端日志收集器, 避免历史日志堆叠刷屏
+async function resetLogForPlatform(pid) {
+  logState[pid] = { offset: 0, lines: [] };
+  if (currentPlatform && currentPlatform.id === pid) {
+    renderLogs([]);
+  }
+  try {
+    await api(`/api/platforms/${pid}/clear-logs`, { method: 'POST' });
+  } catch (e) {
+    // 清空失败不影响分发, 静默忽略
+  }
+}
+
+// 关闭弹窗 - 点击遮罩
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      overlay.classList.remove('active');
+      if (overlay.id === 'detail-modal') stopLogPolling();
+    }
+  });
+});
+
+// ESC 关闭弹窗
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal-overlay.active').forEach(m => {
+      m.classList.remove('active');
+      if (m.id === 'detail-modal') stopLogPolling();
+    });
+  }
+});
+
+// Enter 提交添加平台
+document.getElementById('add-modal').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.ctrlKey) {
+    createPlatform();
+  }
+});
+</script>
+</body>
+</html>
