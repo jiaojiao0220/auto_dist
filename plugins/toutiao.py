@@ -4,8 +4,11 @@
 #   1. 打开编辑器页面 (授权状态下直接进入图文编辑页)
 #   2. 输入标题 (用户提供 XPath)
 #   3. 写入内容 (用户提供 XPath, 富文本编辑区)
-#   4. 点击预览发布按钮 (用户提供 XPath)
-#   5. 若弹出发布确认弹窗, 点击确认发布
+#   4. 选择无封面 (用户提供 XPath)
+#   5. 点击预览发布按钮 (用户提供 XPath), 若有确认弹窗则确认
+#
+# 注意: 头条编辑页有 AI 助手抽屉 (byte-drawer-mask) 会拦截点击,
+#       进入页面后先尝试 Esc 关闭, 所有关键点击使用 force=True 绕过遮罩。
 #
 # 登录态由 Playwright 持久化上下文 (user_data_dir) 自动保存到本地,
 # 首次未授权时 goto 到 https://mp.toutiao.com/auth/page/login 手动登录一次即可。
@@ -130,7 +133,7 @@ def distribute(page, context, title, content):
     print("========== 开始分发到今日头条 ==========")
 
     # ========== 1. 确保在编辑页 ==========
-    print("[1/4] 打开/确认编辑页...")
+    print("[1/5] 打开/确认编辑页...")
     editor_page = page
     current_url = (page.url or "").lower()
     if "publish" not in current_url or "auth/" in current_url:
@@ -153,8 +156,12 @@ def distribute(page, context, title, content):
     except Exception:
         raise Exception("未找到标题输入框, 可能未登录或页面结构变化")
 
+    # 头条编辑页有 AI 助手抽屉 (byte-drawer-mask), 其遮罩会拦截标题/内容区域的点击,
+    # 先尝试用 Esc 关闭, 无法关闭时后续点击一律用 force=True 绕过拦截
+    _close_ai_drawer(editor_page)
+
     # ========== 2. 输入标题 ==========
-    print("[2/4] 输入标题...")
+    print("[2/5] 输入标题...")
     title_entered = False
     title_locators = [
         (f'xpath={TITLE_XPATH}', TITLE_XPATH),
@@ -167,7 +174,7 @@ def distribute(page, context, title, content):
         try:
             loc = editor_page.locator(selector)
             loc.wait_for(state="visible", timeout=5000)
-            loc.click()
+            loc.click(force=True, timeout=5000)
             time.sleep(0.3)
             loc.fill("")
             loc.type(title, delay=30)
@@ -182,8 +189,12 @@ def distribute(page, context, title, content):
         # 兜底: 用 JS 直接赋值 (React 受控组件需要触发 input 事件)
         try:
             editor_page.evaluate(
-                """(xpath, title) => {
-                    const el = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                """(args) => {
+                    const xpath = args.xpath, title = args.title;
+                    let el = document.querySelector('textarea[placeholder*="标题"]');
+                    if (!el) {
+                        el = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    }
                     if (el) {
                         const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
                         setter.call(el, title);
@@ -193,7 +204,7 @@ def distribute(page, context, title, content):
                     }
                     return false;
                 }""",
-                TITLE_XPATH, title,
+                {"xpath": TITLE_XPATH, "title": title},
             )
             print("  ✓ 已通过 JS 输入标题")
             title_entered = True
@@ -214,7 +225,7 @@ def distribute(page, context, title, content):
     time.sleep(1)
 
     # ========== 3. 写入内容 ==========
-    print("[3/4] 写入内容...")
+    print("[3/5] 写入内容...")
     try:
         _write_content(editor_page, content)
         print("  ✓ 内容已写入")
@@ -223,8 +234,32 @@ def distribute(page, context, title, content):
 
     time.sleep(2)
 
-    # ========== 4. 点击预览发布 ==========
-    print("[4/4] 点击预览发布...")
+    # ========== 4. 选择无封面 ==========
+    print("[4/5] 选择无封面...")
+    no_cover_clicked = False
+    try:
+        no_cover = editor_page.locator(
+            'xpath=//*[@id="root"]/div/div[1]/div/div[2]/div[2]/div[1]/div/div[2]/div/div/label[3]/span/div'
+        )
+        no_cover.wait_for(state="visible", timeout=10000)
+        no_cover.click(force=True, timeout=5000)
+        print("  ✓ 已选择无封面")
+        no_cover_clicked = True
+    except Exception as e:
+        print(f"  ✗ 选择无封面失败: {e}")
+        # 兜底: 按文字找"无封面"
+        try:
+            label = editor_page.locator('label:has-text("无封面"), [class*="cover"] label:has-text("无")').last
+            label.click(force=True, timeout=3000)
+            print("  ✓ 已通过文字选择无封面")
+            no_cover_clicked = True
+        except Exception:
+            pass
+
+    time.sleep(1)
+
+    # ========== 5. 点击预览发布 ==========
+    print("[5/5] 点击预览发布...")
     publish_clicked = False
     try:
         publish_btn = editor_page.locator(f'xpath={PUBLISH_XPATH}')
@@ -258,6 +293,32 @@ def distribute(page, context, title, content):
     return "发布成功"
 
 
+def _close_ai_drawer(page):
+    """
+    关闭头条编辑页的 AI 助手抽屉
+
+    头条页面存在 <div class="byte-drawer-mask"> / .ai-assistant-drawer,
+    其遮罩会拦截标题/内容区域的 pointer events, 导致 click 一直重试超时。
+    先按 Esc 尝试关闭; 若仍在, 尝试点击遮罩空白处关闭。
+    """
+    try:
+        page.keyboard.press("Escape")
+        time.sleep(0.8)
+    except Exception:
+        pass
+    try:
+        mask = page.locator(".byte-drawer-mask")
+        if mask.count() > 0 and mask.first.is_visible():
+            # 点击遮罩本身(边缘)关闭抽屉
+            box = mask.first.bounding_box()
+            if box:
+                page.mouse.click(box["x"] + 5, box["y"] + box["height"] / 2)
+                time.sleep(0.8)
+                print("  ✓ 已关闭 AI 助手抽屉")
+    except Exception:
+        pass
+
+
 def _write_content(page, content):
     """
     写入文章内容到富文本编辑区
@@ -265,6 +326,7 @@ def _write_content(page, content):
     头条编辑区为 contenteditable, 优先使用 execCommand insertHTML,
     兜底使用剪贴板粘贴, 再兜底纯文本逐字输入。
     """
+    _close_ai_drawer(page)
     # 定位内容编辑区 (用户提供 XPath, 是一个 <p> 元素, 一般位于 contenteditable 容器内)
     content_el = None
     for selector in [
@@ -285,9 +347,9 @@ def _write_content(page, content):
     if content_el is None:
         raise Exception("找不到内容编辑区")
 
-    # 先点击聚焦
+    # 先点击聚焦 (force 绕过遮罩拦截)
     try:
-        content_el.click()
+        content_el.click(force=True, timeout=5000)
         time.sleep(0.5)
     except Exception:
         pass
@@ -329,7 +391,7 @@ def _write_content(page, content):
             content,
         )
         try:
-            content_el.click()
+            content_el.click(force=True, timeout=5000)
         except Exception:
             pass
         time.sleep(0.5)
