@@ -32,7 +32,7 @@ LOGIN_URL = "https://mp.toutiao.com/auth/page/login"
 # 用户提供的精确 XPath (最高优先级)
 TITLE_XPATH = '//*[@id="root"]/div/div[1]/div/div[1]/div[3]/div/div/div[2]/div/div/div/textarea'
 CONTENT_XPATH = '//*[@id="root"]/div/div[1]/div/div[1]/div[4]/div/div[1]/p'
-PUBLISH_XPATH = '//*[@id="root"]/div/div[1]/div/div[3]/div/button[3]'
+PUBLISH_XPATH = '//*[@id="root"]/div/div[1]/div/div[3]/div/button[3]/span'
 
 
 def on_open(page, context):
@@ -442,13 +442,15 @@ def _confirm_publish_if_needed(page):
     因此用 .first 规避 strict mode, 并按文本排除"预览"状态。
     """
     # 1) 轮询等待预览界面加载完成 + 点击确定发布 (最长 30s, 每 1s 检查)
+    #    精确匹配文本, 排除 "预览并发布" / "定时发布" 等非目标按钮
+    CONFIRM_TEXTS = ("发布", "确定发布", "确认发布", "发表")
     for attempt in range(30):
         try:
             btn = page.locator(f'xpath={CONFIRM_XPATH}').first
             if btn.is_visible():
                 text = (btn.inner_text() or "").strip()
-                # 文本仍含"预览"(如"预览并发布")→ 界面还没加载完, 继续等
-                if "预览" not in text and text:
+                # 只有精确匹配确认文本才点击, 避免误点"定时发布"/"预览并发布"
+                if text in CONFIRM_TEXTS:
                     btn.click(force=True, timeout=3000)
                     print(f"  ✓ 已点击确定发布按钮 (文本: {text})")
                     return
@@ -456,7 +458,7 @@ def _confirm_publish_if_needed(page):
             pass
         time.sleep(1)
 
-    # 2) 兜底: 遍历可见按钮, 精确匹配"发布/确定发布/确认发布/发表", 排除"预览"
+    # 2) 兜底: 遍历可见按钮, 精确匹配确认文本, 排除"预览并发布"/"定时发布"
     try:
         for _ in range(10):
             buttons = page.locator("button:visible")
@@ -465,7 +467,7 @@ def _confirm_publish_if_needed(page):
                 try:
                     b = buttons.nth(i)
                     text = (b.inner_text() or "").strip()
-                    if text in ("发布", "确定发布", "确认发布", "发表"):
+                    if text in CONFIRM_TEXTS:
                         b.click(force=True, timeout=3000)
                         print(f"  ✓ 已点击确定发布按钮 (兜底, 文本: {text})")
                         return
