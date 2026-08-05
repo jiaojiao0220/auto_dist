@@ -1,0 +1,392 @@
+# 今日头条 (toutiao) 自动化插件
+#
+# 分发流程:
+#   1. 打开编辑器页面 (授权状态下直接进入图文编辑页)
+#   2. 输入标题 (用户提供 XPath)
+#   3. 写入内容 (用户提供 XPath, 富文本编辑区)
+#   4. 点击预览发布按钮 (用户提供 XPath)
+#   5. 若弹出发布确认弹窗, 点击确认发布
+#
+# 登录态由 Playwright 持久化上下文 (user_data_dir) 自动保存到本地,
+# 首次未授权时 goto 到 https://mp.toutiao.com/auth/page/login 手动登录一次即可。
+#
+# page: Playwright Page 对象
+# context: Playwright BrowserContext 对象
+# title: 文章标题 (字符串)
+# content: HTML内容 (含图片, 从Word解析) 或纯文本
+
+import time
+import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ===================== 常量 =====================
+PUBLISH_URL = "https://mp.toutiao.com/profile_v4/graphic/publish"
+LOGIN_URL = "https://mp.toutiao.com/auth/page/login"
+
+# 用户提供的精确 XPath (最高优先级)
+TITLE_XPATH = '//*[@id="root"]/div/div[1]/div/div[1]/div[3]/div/div/div[2]/div/div/div/textarea'
+CONTENT_XPATH = '//*[@id="root"]/div/div[1]/div/div[1]/div[4]/div/div[1]/p'
+PUBLISH_XPATH = '//*[@id="root"]/div/div[1]/div/div[3]/div/button[3]'
+
+
+def on_open(page, context):
+    """浏览器打开时调用, 导航到编辑页面"""
+    print("导航到今日头条编辑页面...")
+    try:
+        page.goto(PUBLISH_URL, wait_until="domcontentloaded", timeout=30000)
+    except Exception:
+        try:
+            page.goto(PUBLISH_URL, timeout=30000)
+        except Exception as e:
+            print(f"打开编辑页失败: {e}")
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
+    time.sleep(2)
+
+
+def is_logged_in(page, context=None):
+    """
+    检查是否已登录今日头条
+
+    授权状态下直接进入图文编辑页 (URL 含 publish, 且能找到标题输入框);
+    未授权时会被重定向到登录页 mp.toutiao.com/auth/page/login。
+    """
+    import time as _time
+
+    current_url = (page.url or "").lower()
+
+    # 明确登录页 → 未登录
+    if "auth/page/login" in current_url or "/auth/" in current_url:
+        print("检测到登录页, 未登录")
+        return False
+
+    # 未在头条域名 → 导航到编辑页再判断
+    if "toutiao.com" not in current_url:
+        try:
+            page.goto(PUBLISH_URL, wait_until="domcontentloaded", timeout=20000)
+        except Exception:
+            try:
+                page.goto(PUBLISH_URL, timeout=20000)
+            except Exception:
+                return False
+        try:
+            page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception:
+            pass
+        _time.sleep(2)
+        current_url = (page.url or "").lower()
+        if "auth/page/login" in current_url or "/auth/" in current_url:
+            print("重定向到登录页, 未登录")
+            return False
+
+    # 尝试定位标题输入框 → 找到即已登录 (编辑页特征)
+    for attempt in range(3):
+        try:
+            title_box = page.locator(f'xpath={TITLE_XPATH}')
+            title_box.wait_for(state="visible", timeout=8000)
+            print("检测到编辑页标题输入框, 已登录")
+            return True
+        except Exception:
+            if attempt < 2:
+                _time.sleep(2)
+                continue
+    # 标题框找不到, 再兜底判断 URL 是否在编辑页
+    if "publish" in current_url:
+        print("URL 在编辑页, 视为已登录")
+        return True
+    return False
+
+
+def login(page, context):
+    """登录流程: 跳转登录页, 由用户在浏览器中完成授权, 登录态自动持久化"""
+    print("跳转今日头条登录页, 请在浏览器中完成扫码/账号登录...")
+    try:
+        page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+    except Exception:
+        try:
+            page.goto(LOGIN_URL, timeout=30000)
+        except Exception as e:
+            print(f"打开登录页失败: {e}")
+            return
+    # 等待用户登录成功后回到编辑页 (最长 5 分钟)
+    try:
+        page.wait_for_url("**/profile_v4/**", timeout=300000)
+        print("登录成功! 已进入头条后台")
+    except Exception:
+        print("登录超时, 请检查浏览器窗口或重试")
+
+
+def distribute(page, context, title, content):
+    """
+    分发内容到今日头条
+
+    title: 文章标题
+    content: HTML内容 (含图片) 或纯文本
+    """
+    print("========== 开始分发到今日头条 ==========")
+
+    # ========== 1. 确保在编辑页 ==========
+    print("[1/4] 打开/确认编辑页...")
+    editor_page = page
+    current_url = (page.url or "").lower()
+    if "publish" not in current_url or "auth/" in current_url:
+        try:
+            editor_page.goto(PUBLISH_URL, wait_until="domcontentloaded", timeout=30000)
+        except Exception:
+            try:
+                editor_page.goto(PUBLISH_URL, timeout=30000)
+            except Exception as e:
+                raise Exception(f"无法打开编辑页: {e}")
+        try:
+            editor_page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        time.sleep(3)
+    # 等待标题输入框出现
+    try:
+        editor_page.locator(f'xpath={TITLE_XPATH}').wait_for(state="visible", timeout=20000)
+        print("  ✓ 已进入编辑页")
+    except Exception:
+        raise Exception("未找到标题输入框, 可能未登录或页面结构变化")
+
+    # ========== 2. 输入标题 ==========
+    print("[2/4] 输入标题...")
+    title_entered = False
+    title_locators = [
+        (f'xpath={TITLE_XPATH}', TITLE_XPATH),
+        ('textarea[placeholder*="标题"]', None),
+        ('input[placeholder*="标题"]', None),
+        ('textarea[class*="title"]', None),
+        ('[contenteditable="true"][data-placeholder*="标题"]', None),
+    ]
+    for selector, _desc in title_locators:
+        try:
+            loc = editor_page.locator(selector)
+            loc.wait_for(state="visible", timeout=5000)
+            loc.click()
+            time.sleep(0.3)
+            loc.fill("")
+            loc.type(title, delay=30)
+            print(f"  ✓ 已输入标题: {title}")
+            title_entered = True
+            break
+        except Exception as e:
+            print(f"  ✗ 定位失败({selector[:50]}): {e}")
+            continue
+
+    if not title_entered:
+        # 兜底: 用 JS 直接赋值 (React 受控组件需要触发 input 事件)
+        try:
+            editor_page.evaluate(
+                """(xpath, title) => {
+                    const el = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el) {
+                        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                        setter.call(el, title);
+                        el.dispatchEvent(new Event('input', {bubbles: true}));
+                        el.dispatchEvent(new Event('change', {bubbles: true}));
+                        return true;
+                    }
+                    return false;
+                }""",
+                TITLE_XPATH, title,
+            )
+            print("  ✓ 已通过 JS 输入标题")
+            title_entered = True
+        except Exception as e:
+            print(f"  ✗ JS 输入标题失败: {e}")
+
+    if not title_entered:
+        # 打印调试信息
+        try:
+            info = editor_page.evaluate(
+                '() => Array.from(document.querySelectorAll("textarea, input")).map(i => ({tag: i.tagName, id: i.id, placeholder: i.placeholder, class: i.className})).slice(0, 10)'
+            )
+            print(f"  [调试] 页面输入框: {info}")
+        except Exception:
+            pass
+        raise Exception("输入标题失败: 所有选择器都无法定位标题输入框")
+
+    time.sleep(1)
+
+    # ========== 3. 写入内容 ==========
+    print("[3/4] 写入内容...")
+    try:
+        _write_content(editor_page, content)
+        print("  ✓ 内容已写入")
+    except Exception as e:
+        print(f"  ✗ 写入内容失败: {e}")
+
+    time.sleep(2)
+
+    # ========== 4. 点击预览发布 ==========
+    print("[4/4] 点击预览发布...")
+    publish_clicked = False
+    try:
+        publish_btn = editor_page.locator(f'xpath={PUBLISH_XPATH}')
+        publish_btn.wait_for(state="visible", timeout=10000)
+        publish_btn.click(force=True, timeout=5000)
+        print("  已点击预览发布按钮")
+        publish_clicked = True
+    except Exception as e:
+        print(f"  ✗ 点击预览发布失败: {e}")
+        # 兜底: 按文本查找
+        for text in ["发布", "预览", "发表"]:
+            try:
+                btn = editor_page.locator(f'button:has-text("{text}")').last
+                btn.wait_for(state="visible", timeout=3000)
+                btn.click(force=True, timeout=3000)
+                print(f"  已通过文本[{text}]点击发布")
+                publish_clicked = True
+                break
+            except Exception:
+                continue
+
+    if not publish_clicked:
+        raise Exception("找不到预览发布按钮")
+
+    # 等待弹窗/跳转, 处理可能的"确认发布"弹窗
+    time.sleep(2)
+    _confirm_publish_if_needed(editor_page)
+
+    time.sleep(5)
+    print(f"========== 分发完成: {title} ==========")
+    return "发布成功"
+
+
+def _write_content(page, content):
+    """
+    写入文章内容到富文本编辑区
+
+    头条编辑区为 contenteditable, 优先使用 execCommand insertHTML,
+    兜底使用剪贴板粘贴, 再兜底纯文本逐字输入。
+    """
+    # 定位内容编辑区 (用户提供 XPath, 是一个 <p> 元素, 一般位于 contenteditable 容器内)
+    content_el = None
+    for selector in [
+        f'xpath={CONTENT_XPATH}',
+        '[contenteditable="true"]',
+        '.ProseMirror',
+        '.ql-editor',
+        '[contenteditable="true"] p',
+    ]:
+        try:
+            loc = page.locator(selector).first
+            if loc.is_visible():
+                content_el = loc
+                break
+        except Exception:
+            continue
+
+    if content_el is None:
+        raise Exception("找不到内容编辑区")
+
+    # 先点击聚焦
+    try:
+        content_el.click()
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    # 方式1: execCommand insertHTML (富文本保留格式/图片)
+    try:
+        page.evaluate(
+            """(html) => {
+                const el = document.querySelector('[contenteditable="true"]') || document.querySelector('.ProseMirror') || document.querySelector('.ql-editor');
+                if (el) {
+                    el.focus();
+                    const sel = window.getSelection();
+                    sel.selectAllChildren(el);
+                    document.execCommand('delete', false, null);
+                    document.execCommand('insertHTML', false, html);
+                    return true;
+                }
+                return false;
+            }""",
+            content,
+        )
+        time.sleep(1)
+        # 验证内容是否写入
+        text = _get_content_text(page)
+        if text and len(text.strip()) > 5:
+            return
+    except Exception as e:
+        print(f"  execCommand 方式失败: {e}")
+
+    # 方式2: 剪贴板粘贴
+    try:
+        page.evaluate(
+            """async (html) => {
+                const blob = new Blob([html], {type: 'text/html'});
+                const textBlob = new Blob([html.replace(/<[^>]+>/g, '')], {type: 'text/plain'});
+                const item = new ClipboardItem({'text/html': blob, 'text/plain': textBlob});
+                await navigator.clipboard.write([item]);
+            }""",
+            content,
+        )
+        try:
+            content_el.click()
+        except Exception:
+            pass
+        time.sleep(0.5)
+        page.keyboard.press("Control+V")
+        time.sleep(2)
+        text = _get_content_text(page)
+        if text and len(text.strip()) > 5:
+            return
+    except Exception as e:
+        print(f"  剪贴板方式失败: {e}")
+
+    # 方式3: 纯文本逐字输入
+    plain_text = re.sub(r"<[^>]+>", "\n", content)
+    plain_text = re.sub(r"\n{3,}", "\n\n", plain_text).strip()
+    try:
+        page.keyboard.type(plain_text, delay=5)
+        time.sleep(1)
+        return
+    except Exception as e:
+        raise Exception(f"所有写入内容方式均失败: {e}")
+
+
+def _get_content_text(page):
+    """获取内容编辑区的文本, 用于验证是否写入成功"""
+    try:
+        return page.evaluate(
+            """() => {
+                const el = document.querySelector('[contenteditable="true"]') || document.querySelector('.ProseMirror') || document.querySelector('.ql-editor');
+                return el ? el.innerText : '';
+            }"""
+        )
+    except Exception:
+        return ""
+
+
+def _confirm_publish_if_needed(page):
+    """点击预览发布后, 若弹出发布确认弹窗则点击确认"""
+    try:
+        # 常见确认按钮文本
+        for text in ["发布", "确认发布", "发表", "确定"]:
+            try:
+                btn = page.locator(f'button:has-text("{text}")').last
+                if btn.is_visible():
+                    btn.click(force=True, timeout=3000)
+                    print(f"  已点击确认发布按钮[{text}]")
+                    return
+            except Exception:
+                continue
+        # 若没有弹窗按钮, 按 Escape 关闭
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def on_close(page, context):
+    """浏览器关闭时调用"""
+    print("今日头条浏览器关闭")
