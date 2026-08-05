@@ -220,7 +220,8 @@ def _distribute_picture_text(page, context, title, content, image_paths):
     title_locators = [
         (f'xpath={TITLE_XPATH}', TITLE_XPATH),
         ('textarea[placeholder*="标题"], input[placeholder*="标题"], [contenteditable="true"][data-placeholder*="标题"]', None),
-        ('[contenteditable="true"]', None),
+        # 兜底: 排除正文/内容占位符的 contenteditable, 避免选中内容框
+        ('#root [contenteditable="true"]:not([data-placeholder*="正文"]):not([data-placeholder*="内容"]):not([data-placeholder*="写"])', None),
     ]
     for selector, _d in title_locators:
         try:
@@ -242,8 +243,13 @@ def _distribute_picture_text(page, context, title, content, image_paths):
             editor_page.evaluate(
                 """(args) => {
                     const title = args.title;
-                    let el = document.evaluate(args.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                    if (!el) el = document.querySelector('[contenteditable="true"]');
+                    let el = null;
+                    try {
+                        el = document.evaluate(args.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    } catch (e) {}
+                    if (!el) {
+                        el = document.querySelector('#root [contenteditable="true"][data-placeholder*="标题"], #root [contenteditable="true"]:not([data-placeholder*="正文"]):not([data-placeholder*="内容"])');
+                    }
                     if (el) {
                         el.focus();
                         el.textContent = title;
@@ -321,7 +327,7 @@ def _distribute_picture_text(page, context, title, content, image_paths):
 
 
 def _upload_images(page, image_paths):
-    """通过文件选择器上传图片"""
+    """通过文件选择器上传图片, 上传完成后关闭文件对话框"""
     try:
         # 点击上传按钮打开文件对话框
         upload_btn = page.locator(f'xpath={UPLOAD_XPATH}')
@@ -330,9 +336,7 @@ def _upload_images(page, image_paths):
         time.sleep(1)
 
         # 使用 Playwright 的 file chooser 处理文件选择
-        # 注意: 文件对话框由系统弹出, 需用 expect_file_chooser
         from playwright.sync_api import sync_playwright
-        # 通过 Page.expect_file_chooser 方式
         try:
             with page.expect_file_chooser(timeout=10000) as fc_info:
                 upload_btn.click(force=True, timeout=5000)
@@ -347,20 +351,45 @@ def _upload_images(page, image_paths):
                 print(f"  ✓ 已通过 input[type=file] 上传 {len(image_paths)} 张图片")
             except Exception as e2:
                 raise Exception(f"图片上传失败: {e2}")
+
+        # 等待上传完成, 然后关闭文件对话框/取消选择状态
+        time.sleep(3)
+        try:
+            # 按 Esc 关闭可能残留的文件对话框/取消焦点
+            page.keyboard.press("Escape")
+            time.sleep(0.5)
+        except Exception:
+            pass
+        # 若页面上还有"确认/完成/关闭"类的上传确认弹窗, 尝试关闭
+        try:
+            for text in ["确认", "完成", "确定", "关闭", "取消", "Done"]:
+                btn = page.locator(f'button:has-text("{text}")').last
+                if btn.is_visible():
+                    btn.click(force=True, timeout=2000)
+                    print(f"  已关闭上传确认弹窗[{text}]")
+                    break
+        except Exception:
+            pass
     except Exception as e:
         raise Exception(f"上传图片失败: {e}")
 
 
 def _write_content(page, content):
-    """写入内容到富文本编辑区"""
-    # 定位内容编辑区
+    """
+    写入内容到富文本编辑区
+
+    重要: 标题框和内容框都是 contenteditable, 必须用用户提供的 CONTENT_XPATH
+    精确区分 (标题在 div[4], 内容在 div[5]), 绝不能 fallback 到通用
+    [contenteditable="true"] (会选到标题框导致标题内容写到一块)。
+    """
+    # 定位内容编辑区: 只认用户提供的 CONTENT_XPATH, 兜底也排除标题区
     content_el = None
     for selector in [
         f'xpath={CONTENT_XPATH}',
-        '[contenteditable="true"]',
+        '#root [contenteditable="true"][data-placeholder*="正文"], #root [contenteditable="true"][data-placeholder*="内容"], #root [contenteditable="true"][data-placeholder*="写"]',
+        '#root [contenteditable="true"]:not([data-placeholder*="标题"])',
         '.ProseMirror',
         '.ql-editor',
-        '[contenteditable="true"] p',
     ]:
         try:
             loc = page.locator(selector).first
@@ -379,11 +408,20 @@ def _write_content(page, content):
     except Exception:
         pass
 
-    # 方式1: execCommand insertHTML
+    # 方式1: execCommand insertHTML (按 XPath 精确定位内容区)
     try:
         page.evaluate(
-            """(html) => {
-                const el = document.querySelector('[contenteditable="true"]') || document.querySelector('.ProseMirror') || document.querySelector('.ql-editor');
+            """(args) => {
+                const html = args.html, xpath = args.xpath;
+                // 优先按用户 XPath 定位内容区
+                let el = null;
+                try {
+                    el = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                } catch (e) {}
+                if (!el) {
+                    // 兜底: 非标题的 contenteditable
+                    el = document.querySelector('#root [contenteditable="true"][data-placeholder*="正文"], #root [contenteditable="true"][data-placeholder*="内容"], #root [contenteditable="true"]:not([data-placeholder*="标题"])');
+                }
                 if (el) {
                     el.focus();
                     const sel = window.getSelection();
@@ -394,7 +432,7 @@ def _write_content(page, content):
                 }
                 return false;
             }""",
-            content,
+            {"html": content, "xpath": CONTENT_XPATH},
         )
         time.sleep(1)
         text = _get_content_text(page)
@@ -439,13 +477,20 @@ def _write_content(page, content):
 
 
 def _get_content_text(page):
-    """获取内容编辑区的文本"""
+    """获取内容编辑区的文本 (按 CONTENT_XPATH 精确读取, 不读标题框)"""
     try:
         return page.evaluate(
-            """() => {
-                const el = document.querySelector('[contenteditable="true"]') || document.querySelector('.ProseMirror') || document.querySelector('.ql-editor');
+            """(xpath) => {
+                let el = null;
+                try {
+                    el = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                } catch (e) {}
+                if (!el) {
+                    el = document.querySelector('#root [contenteditable="true"][data-placeholder*="正文"], #root [contenteditable="true"][data-placeholder*="内容"], #root [contenteditable="true"]:not([data-placeholder*="标题"])');
+                }
                 return el ? el.innerText : '';
-            }"""
+            }""",
+            CONTENT_XPATH,
         )
     except Exception:
         return ""
