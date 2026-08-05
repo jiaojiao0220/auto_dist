@@ -484,31 +484,38 @@ for _d in [CTRIP_ROOT_DIR, CTRIP_PICTURE_TEXT_DIR, CTRIP_VIDEO_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 
-@app.get("/api/ctrip/folders")
-async def list_ctrip_folders():
-    """
-    列出携程图文目录下的待发布文件夹
+IMAGE_EXTS = ("*.jpg", "*.jpeg", "*.png", "*.gif", "*.webp", "*.bmp")
 
-    每个文件夹 = 一个图文块 (图片 + word文档), 返回文件夹名、
-    图片数量、word文档信息(标题/内容预览/图片数)。
+
+def _collect_images(folder: Path) -> list:
+    """收集文件夹下所有图片"""
+    images = []
+    for ext in IMAGE_EXTS:
+        images.extend(folder.glob(ext))
+    return sorted(images)
+
+
+def _scan_ctrip_picture_text(root: Path) -> list:
     """
-    folders = []
-    if not CTRIP_PICTURE_TEXT_DIR.exists():
-        return folders
-    for folder in sorted(CTRIP_PICTURE_TEXT_DIR.iterdir()):
-        if not folder.is_dir():
-            continue
-        # 图片
-        images = []
-        for ext in ("*.jpg", "*.jpeg", "*.png", "*.gif", "*.webp", "*.bmp"):
-            images.extend(folder.glob(ext))
-        # word 文档
-        word_files = list(folder.glob("*.docx")) + list(folder.glob("*.doc"))
-        title = ""
-        content_preview = ""
-        content_len = 0
-        error = None
+    递归扫描图文目录, 找出所有图文块
+
+    规则:
+    - 一个图文块 = 一个包含 word 文档的文件夹 (word 第一段为标题)
+    - 若用户目录下有很多子文件夹, 每个含 word 的子文件夹都是一个图文块
+    - 若用户目录直接放图片+word, 则该目录本身就是一个图文块
+    - 一般一个文件夹最多一个 word 文档 (取第一个)
+    """
+    results = []
+
+    def walk(current: Path, rel: str):
+        # 当前文件夹是否含 word 文档 → 是则为一个图文块 (先判断自身, 再递归子目录)
+        word_files = list(current.glob("*.docx")) + list(current.glob("*.doc"))
         if word_files:
+            images = _collect_images(current)
+            title = ""
+            content_preview = ""
+            content_len = 0
+            error = None
             try:
                 parsed = parse_docx(str(word_files[0]))
                 title = parsed.get("title", "")
@@ -519,18 +526,41 @@ async def list_ctrip_folders():
                 content_preview = _re.sub(r"<[^>]+>", "", html_content).strip()[:200]
             except Exception as e:
                 error = str(e)
-        folders.append({
-            "name": folder.name,
-            "path": str(folder),
-            "image_count": len(images),
-            "images": [img.name for img in sorted(images)],
-            "word_file": word_files[0].name if word_files else None,
-            "title": title,
-            "content_preview": content_preview,
-            "content_len": content_len,
-            "error": error,
-        })
-    return folders
+            # 相对路径名: 从图文根目录到该文件夹, 如 "分类目录A/图文块1"
+            rel_name = f"{rel}{current.name}".rstrip("/")
+            results.append({
+                "name": rel_name,
+                "path": str(current),
+                "image_count": len(images),
+                "images": [img.name for img in images],
+                "word_file": word_files[0].name if word_files else None,
+                "title": title,
+                "content_preview": content_preview,
+                "content_len": content_len,
+                "error": error,
+            })
+        # 递归子文件夹 (每个可能都是独立图文块)
+        for child in sorted(current.iterdir()):
+            if child.is_dir():
+                walk(child, f"{rel}{current.name}/")
+
+    walk(root, "")
+    # 按路径排序
+    results.sort(key=lambda x: x["path"])
+    return results
+
+
+@app.get("/api/ctrip/folders")
+async def list_ctrip_folders():
+    """
+    列出携程图文目录下的所有图文块 (递归)
+
+    图文块 = 含 word 文档的文件夹 (word 第一段为标题)。
+    目录下多个子文件夹 = 多个图文; 目录直接放图片+word = 单个图文。
+    """
+    if not CTRIP_PICTURE_TEXT_DIR.exists():
+        return []
+    return _scan_ctrip_picture_text(CTRIP_PICTURE_TEXT_DIR)
 
 
 @app.on_event("shutdown")
