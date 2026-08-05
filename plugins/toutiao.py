@@ -124,6 +124,45 @@ def login(page, context):
         print("登录超时, 请检查浏览器窗口或重试")
 
 
+def _title_char_weight(ch: str) -> float:
+    """头条标题字数权重: 中文/全角字符 = 1字, 英文/数字/半角 = 0.5字 (2个算1字)"""
+    import unicodedata
+    try:
+        w = unicodedata.east_asian_width(ch)
+        # W=全角, F=全角(ASCII变体), A=模糊(多数视为半角)
+        return 1.0 if w in ("W", "F") else 0.5
+    except Exception:
+        return 1.0
+
+
+def _is_ascii_word_char(ch: str) -> bool:
+    """是否为 ASCII 英文/数字字符 (仅用于英文单词边界判断, 不含中文)"""
+    return ch.isascii() and ch.isalnum()
+
+
+def _truncate_title(title: str, max_len: int = 30) -> str:
+    """按头条字数规则截断标题 (中文=1字, 英文2个=1字), 上限 max_len 字"""
+    total = 0.0
+    cut = len(title)
+    for i, ch in enumerate(title):
+        w = _title_char_weight(ch)
+        if total + w > max_len:
+            cut = i
+            break
+        total += w
+    if cut >= len(title):
+        return title
+    # 若切点在英文单词中间, 回退到最近的空白/非英文边界 (最多8个字符);
+    # 全英文连续标题找不到边界时保持原 cut, 保证不超字数上限
+    if cut > 0 and _is_ascii_word_char(title[cut - 1]):
+        b = cut
+        while b > 0 and b > cut - 8 and _is_ascii_word_char(title[b - 1]):
+            b -= 1
+        if b > 0 and not _is_ascii_word_char(title[b - 1]):
+            cut = b
+    return title[:cut]
+
+
 def distribute(page, context, title, content):
     """
     分发内容到今日头条
@@ -131,11 +170,13 @@ def distribute(page, context, title, content):
     title: 文章标题
     content: HTML内容 (含图片) 或纯文本
     """
-    # 头条标题限 2~30 个字, 超长时截断 (按字符数, 中文/英文均计 1)
+    # 头条标题限 2~30 个字 (中文=1字, 英文2个=1字), 超长自动截断
     TITLE_MAX_LEN = 30
-    if title and len(title) > TITLE_MAX_LEN:
-        print(f"  标题超长 ({len(title)} 字 > {TITLE_MAX_LEN} 字), 截断为: {title[:TITLE_MAX_LEN]}")
-        title = title[:TITLE_MAX_LEN]
+    if title:
+        old_len = title
+        title = _truncate_title(title, TITLE_MAX_LEN)
+        if title != old_len:
+            print(f"  标题超长, 已按头条字数规则截断 (上限{TITLE_MAX_LEN}字): {title}")
 
     print("========== 开始分发到今日头条 ==========")
 
