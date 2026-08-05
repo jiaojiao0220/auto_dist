@@ -32,7 +32,7 @@ UPLOAD_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[3]/d
 TITLE_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[4]/div[2]/div/div[2]/div/div/div/div'
 CONTENT_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[5]/div[3]/div/div[2]/div'
 ADDRESS_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[9]/div/div'
-PUBLISH_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[14]/div/button[2]'
+PUBLISH_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[14]/div/button[2]/span'
 
 MAX_IMAGES = 20  # 图文最多 20 张图片
 
@@ -532,13 +532,18 @@ def _extract_address(content):
 
 
 def _input_address(page, address):
-    """输入地址并在下拉列表中选择最接近的地址"""
+    """输入地址并在下拉列表中选择第一个/最接近的地址"""
     try:
         addr_box = page.locator(f'xpath={ADDRESS_XPATH}')
         addr_box.wait_for(state="visible", timeout=10000)
         addr_box.click(force=True, timeout=5000)
         time.sleep(0.5)
-        addr_box.fill("")
+        # 先尝试 fill, 失败则用键盘输入
+        try:
+            addr_box.fill("")
+        except Exception:
+            page.keyboard.press("Control+A")
+            page.keyboard.press("Backspace")
         addr_box.type(address, delay=50)
         print(f"  已输入地址: {address}")
     except Exception as e:
@@ -547,22 +552,28 @@ def _input_address(page, address):
         try:
             loc = page.locator('input[placeholder*="地址"], input[placeholder*="位置"], [contenteditable="true"][data-placeholder*="地址"]').first
             loc.click(force=True, timeout=3000)
-            loc.fill("")
+            try:
+                loc.fill("")
+            except Exception:
+                page.keyboard.press("Control+A")
+                page.keyboard.press("Backspace")
             loc.type(address, delay=50)
             print("  已通过兜底选择器输入地址")
         except Exception as e2:
             raise Exception(f"地址输入失败: {e2}")
 
-    # 等待下拉列表出现, 选择第一个选项 (最接近的地址)
-    time.sleep(2)
+    # 等待下拉列表出现, 选择第一个/最接近的选项 (最长 15s)
     selected = False
-    for attempt in range(10):
+    for attempt in range(15):
         try:
-            # 常见下拉选项选择器
+            # 下拉选项: 常见类名 + 可见 + 有文本 (排除输入框本身)
             selectors = [
                 '[class*="option"]:visible',
                 '[class*="dropdown"] [class*="item"]:visible',
+                '[class*="dropdown"] li:visible',
                 '[class*="search"] [class*="result"]:visible',
+                '[class*="suggestion"]:visible',
+                '[class*="suggest"] [class*="item"]:visible',
                 '[class*="list"] li:visible',
                 'ul[class*="dropdown"] li:visible',
             ]
@@ -570,10 +581,18 @@ def _input_address(page, address):
                 try:
                     options = page.locator(sel)
                     count = options.count()
-                    if count > 0:
-                        options.first.click(force=True, timeout=3000)
-                        print(f"  ✓ 已选择下拉地址选项 (共{count}个, 取第一个)")
-                        selected = True
+                    for i in range(count):
+                        try:
+                            txt = (options.nth(i).inner_text() or "").strip()
+                        except Exception:
+                            continue
+                        # 取第一个有内容的选项 (即最接近的地址)
+                        if txt and len(txt) > 1:
+                            options.nth(i).click(force=True, timeout=3000)
+                            print(f"  ✓ 已选择下拉地址选项 (第{i+1}个): {txt[:40]}")
+                            selected = True
+                            break
+                    if selected:
                         break
                 except Exception:
                     continue
@@ -582,6 +601,15 @@ def _input_address(page, address):
         except Exception:
             pass
         time.sleep(1)
+
+    if not selected:
+        # 兜底: 按 Enter 选择当前高亮项
+        try:
+            page.keyboard.press("Enter")
+            print("  已按 Enter 选择地址 (兜底)")
+            selected = True
+        except Exception:
+            pass
 
     if not selected:
         print("  ⚠ 未找到地址下拉选项, 可能地址未匹配 (请人工确认)")
