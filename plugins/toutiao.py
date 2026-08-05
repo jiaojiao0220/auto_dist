@@ -5,7 +5,8 @@
 #   2. 输入标题 (用户提供 XPath)
 #   3. 写入内容 (用户提供 XPath, 富文本编辑区)
 #   4. 选择无封面 (用户提供 XPath)
-#   5. 点击预览发布按钮 (用户提供 XPath), 若有确认弹窗则确认
+#   5. 点击预览发布按钮 (用户提供 XPath: .../div[3]/div/button[3])
+#   6. 点击确定发布按钮 (用户提供 XPath: .../div[3]/div/button[2]/span)
 #
 # 注意: 头条编辑页有 AI 助手抽屉 (byte-drawer-mask) 会拦截点击,
 #       进入页面后先尝试 Esc 关闭, 所有关键点击使用 force=True 绕过遮罩。
@@ -427,10 +428,24 @@ def _get_content_text(page):
         return ""
 
 
+# 确定发布按钮 (预览发布后的确认弹窗, 用户提供 XPath, 最高优先级)
+CONFIRM_XPATH = '//*[@id="root"]/div/div[1]/div/div[3]/div/button[2]/span'
+
+
 def _confirm_publish_if_needed(page):
-    """点击预览发布后, 若弹出发布确认弹窗则点击确认"""
+    """点击预览发布后, 点击"确定发布"确认按钮"""
+    # 1) 用户提供的精确 XPath (最高优先级)
     try:
-        # 常见确认按钮文本
+        btn = page.locator(f'xpath={CONFIRM_XPATH}')
+        btn.wait_for(state="visible", timeout=8000)
+        btn.click(force=True, timeout=5000)
+        print("  ✓ 已点击确定发布按钮 (用户XPath)")
+        return
+    except Exception as e:
+        print(f"  确定发布按钮(XPath)未出现或点击失败: {e}")
+
+    # 2) 常见确认按钮文本兜底
+    try:
         for text in ["发布", "确认发布", "发表", "确定"]:
             try:
                 btn = page.locator(f'button:has-text("{text}")').last
