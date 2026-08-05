@@ -125,7 +125,10 @@ def login(page, context):
 
 
 def _title_char_weight(ch: str) -> float:
-    """头条标题字数权重: 中文/全角字符 = 1字, 英文/数字/半角 = 0.5字 (2个算1字)"""
+    """头条标题字数权重: 中文/全角字符 = 1字, 英文/数字/半角 = 0.5字 (2个算1字), 空格 = 0 (不算有效字符)"""
+    # 空格(半角/全角)不算有效字符
+    if ch in (" ", "\u3000", "\t", "\n", "\r"):
+        return 0.0
     import unicodedata
     try:
         w = unicodedata.east_asian_width(ch)
@@ -141,7 +144,7 @@ def _is_ascii_word_char(ch: str) -> bool:
 
 
 def _truncate_title(title: str, max_len: int = 30) -> str:
-    """按头条字数规则截断标题 (中文=1字, 英文2个=1字), 上限 max_len 字"""
+    """按头条字数规则截断标题 (中文=1字, 英文2个=1字, 空格不计), 上限 max_len 字"""
     total = 0.0
     cut = len(title)
     for i, ch in enumerate(title):
@@ -271,6 +274,7 @@ def distribute(page, context, title, content):
         raise Exception("输入标题失败: 所有选择器都无法定位标题输入框")
 
     time.sleep(1)
+    _capture_page_hints(editor_page, "标题输入后")
 
     # ========== 3. 写入内容 ==========
     print("[3/5] 写入内容...")
@@ -281,6 +285,7 @@ def distribute(page, context, title, content):
         print(f"  ✗ 写入内容失败: {e}")
 
     time.sleep(2)
+    _capture_page_hints(editor_page, "内容写入后")
 
     # ========== 4. 选择无封面 ==========
     print("[4/5] 选择无封面...")
@@ -332,13 +337,77 @@ def distribute(page, context, title, content):
     if not publish_clicked:
         raise Exception("找不到预览发布按钮")
 
+    # 捕获预览发布后的页面提示 (如"文字超出限制"等 toast/message)
+    time.sleep(1)
+    _capture_page_hints(editor_page, "预览发布后")
+
     # 等待弹窗/跳转, 处理可能的"确认发布"弹窗
     time.sleep(2)
     _confirm_publish_if_needed(editor_page)
 
-    time.sleep(5)
+    # 捕获确定发布后的页面提示 (发布成功/失败/校验错误等)
+    time.sleep(1)
+    _capture_page_hints(editor_page, "确定发布后")
+
+    # 发布结果确认阶段再捕获一次 (部分提示延迟出现)
+    time.sleep(3)
+    _capture_page_hints(editor_page, "发布结果")
+
+    time.sleep(2)
     print(f"========== 分发完成: {title} ==========")
     return "发布成功"
+
+
+def _capture_page_hints(page, label="页面提示"):
+    """
+    捕获页面上出现的提示信息 (toast/message/错误文本等), 打印到日志供前端展示
+
+    头条(字节系)页面提示常见类名: byte-toast / byte-message / semi-toast /
+    [class*="toast"] / [class*="message"] 等; 提示通常短暂显示, 需在操作后立即抓取。
+    """
+    try:
+        hints = page.evaluate(
+            """() => {
+                const sels = [
+                    '.byte-toast', '.byte-toast-content', '.byte-message', '.byte-message-content',
+                    '.byte-tooltip', '.semi-toast', '.semi-toast-content',
+                    '.ant-message', '.ant-message-notice-content',
+                    '[class*="toast"]', '[class*="Toast"]',
+                    '[class*="message"]', '[class*="Message"]',
+                    '[class*="notice"]', '[class*="Notice"]',
+                    '[class*="error"]', '[class*="Error"]',
+                    '[class*="tip"]', '[class*="Tip"]',
+                ];
+                const out = [];
+                const seen = new Set();
+                for (const sel of sels) {
+                    try {
+                        for (const el of document.querySelectorAll(sel)) {
+                            const style = window.getComputedStyle(el);
+                            if (style.display === 'none' || style.visibility === 'hidden') continue;
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width === 0 && rect.height === 0) continue;
+                            const t = (el.innerText || el.textContent || '').trim();
+                            if (t && t.length > 1 && t.length < 200 && !seen.has(t)) {
+                                seen.add(t);
+                                out.push(t);
+                            }
+                        }
+                    } catch (e) {}
+                }
+                return out;
+            }"""
+        )
+        if hints:
+            for h in hints:
+                # 含错误/限制关键词的提示用 ⚠ 标记, 便于前端识别
+                warn = any(k in h for k in ["超", "限", "错误", "失败", "不能", "不可", "请", "无效", "超过", "最多"])
+                print(f"  [{label}] {'⚠' if warn else 'ℹ'} {h}")
+            return True
+        return False
+    except Exception as e:
+        print(f"  [捕获页面提示失败] {e}")
+        return False
 
 
 def _close_ai_drawer(page):

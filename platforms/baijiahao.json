@@ -1,0 +1,8 @@
+{
+  "id": "baijiahao",
+  "name": "百家号",
+  "url": "https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1",
+  "description": "文章分发平台 - 授权后直接进入文章编辑页, 编辑并发布文章到百度百家号",
+  "plugin_file": "baijiahao.py",
+  "created_at": "2026-08-05T15:40:00.000000"
+}
