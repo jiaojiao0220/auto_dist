@@ -131,6 +131,12 @@ def distribute(page, context, title, content):
     title: 文章标题
     content: HTML内容 (含图片) 或纯文本
     """
+    # 头条标题限 2~30 个字, 超长时截断 (按字符数, 中文/英文均计 1)
+    TITLE_MAX_LEN = 30
+    if title and len(title) > TITLE_MAX_LEN:
+        print(f"  标题超长 ({len(title)} 字 > {TITLE_MAX_LEN} 字), 截断为: {title[:TITLE_MAX_LEN]}")
+        title = title[:TITLE_MAX_LEN]
+
     print("========== 开始分发到今日头条 ==========")
 
     # ========== 1. 确保在编辑页 ==========
