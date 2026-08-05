@@ -342,8 +342,9 @@ def distribute(page, context, title, content):
     _capture_page_hints(editor_page, "预览发布后")
 
     # 等待弹窗/跳转, 处理可能的"确认发布"弹窗
+    # (预览发布后头条会在当前标签页弹出新弹窗, 需等弹窗加载完成再确认)
     time.sleep(2)
-    _confirm_publish_if_needed(editor_page)
+    _confirm_publish_if_needed(editor_page, context)
 
     # 捕获确定发布后的页面提示 (发布成功/失败/校验错误等)
     time.sleep(1)
@@ -436,13 +437,40 @@ def _close_ai_drawer(page):
         pass
 
 
+def _strip_base64_images(html: str) -> str:
+    """
+    剥离 HTML 中的 base64 内嵌图片 <img src="data:...;base64,...">
+
+    Word 解析会把图片转成 base64 内嵌, 单张可达几十万字符, 导致头条报
+    "正文长度超过限制"。头条不支持内嵌图, 直接移除 img 标签, 保留文本。
+    """
+    if not html or "data:image" not in html:
+        return html
+    import re as _re
+    # 移除含 data:image 的 <img ...> 标签
+    cleaned = _re.sub(r'<img[^>]*src="data:image[^"]*"[^>]*>', "", html, flags=_re.IGNORECASE)
+    # 兜底: 移除所有含 base64 的 img
+    if "data:image" in cleaned:
+        cleaned = _re.sub(r'<img[^>]*base64[^>]*>', "", cleaned, flags=_re.IGNORECASE)
+    return cleaned
+
+
 def _write_content(page, content):
     """
     写入文章内容到富文本编辑区
 
     头条编辑区为 contenteditable, 优先使用 execCommand insertHTML,
     兜底使用剪贴板粘贴, 再兜底纯文本逐字输入。
+
+    重要: Word 解析的 HTML 会把图片转成 base64 内嵌 (<img src="data:...base64,...">),
+    头条不支持内嵌图片且会因 HTML 超长报"正文长度超过限制", 因此写入前先剥离
+    base64 图片, 仅保留文本 (图片在头条需手动上传/图床)。
     """
+    # 剥离 base64 内嵌图片 (data:image 的 <img>), 避免头条报正文长度超限
+    clean_content = _strip_base64_images(content)
+    if clean_content != content:
+        print(f"  已剥离 {content.count('<img')} 个内嵌 base64 图片 (头条不支持内嵌图)")
+
     _close_ai_drawer(page)
     # 定位内容编辑区 (用户提供 XPath, 是一个 <p> 元素, 一般位于 contenteditable 容器内)
     content_el = None
@@ -486,7 +514,7 @@ def _write_content(page, content):
                 }
                 return false;
             }""",
-            content,
+            clean_content,
         )
         time.sleep(1)
         # 验证内容是否写入
@@ -505,7 +533,7 @@ def _write_content(page, content):
                 const item = new ClipboardItem({'text/html': blob, 'text/plain': textBlob});
                 await navigator.clipboard.write([item]);
             }""",
-            content,
+            clean_content,
         )
         try:
             content_el.click(force=True, timeout=5000)
@@ -521,7 +549,7 @@ def _write_content(page, content):
         print(f"  剪贴板方式失败: {e}")
 
     # 方式3: 纯文本逐字输入
-    plain_text = re.sub(r"<[^>]+>", "\n", content)
+    plain_text = re.sub(r"<[^>]+>", "\n", clean_content)
     plain_text = re.sub(r"\n{3,}", "\n\n", plain_text).strip()
     try:
         page.keyboard.type(plain_text, delay=5)
@@ -544,56 +572,145 @@ def _get_content_text(page):
         return ""
 
 
-# 确定发布按钮 (预览发布后的确认弹窗, 用户提供 XPath, 最高优先级)
-CONFIRM_XPATH = '//*[@id="root"]/div/div[1]/div/div[3]/div/button[2]/span'
+# 确定发布按钮 (预览发布后的确认弹窗, 用户提供)
+# 元素: <button class="byte-btn ... publish-btn publish-btn-last"><span>确认发布</span></button>
+# class "publish-btn publish-btn-last" 非常独特, 可精确定位且不会误点"预览并发布"/"定时发布"
+CONFIRM_CSS = 'button.publish-btn.publish-btn-last'
+CONFIRM_XPATH = '/html/body/div[1]/div/div[3]/section/main/div[2]/div/div/div[2]/div/div/div[1]/div/div[3]/div/button[2]'
 
 
-def _confirm_publish_if_needed(page):
+def _is_btn_ready(btn) -> bool:
     """
-    点击预览发布后, 等待预览发布界面加载完成, 再点击确定发布按钮
+    判断按钮是否真正可点击 (不在 loading/disabled 状态)
 
-    关键点: 点击预览发布后界面需要时间加载(按钮处于 loading / 文本仍为
-    "预览并发布"), 必须等加载完成、按钮文本变为"发布"后才能点击。
-    期间同一 XPath 可能匹配到 2 个元素(loading 包装 span + 正常 span),
-    因此用 .first 规避 strict mode, 并按文本排除"预览"状态。
+    头条按钮在提交/加载时 class 会带 byte-btn-loading, 且可能随 React
+    重渲染被 detached。此时点击会超时, 应跳过等待下一轮。
     """
-    # 1) 轮询等待预览界面加载完成 + 点击确定发布 (最长 30s, 每 1s 检查)
-    #    精确匹配文本, 排除 "预览并发布" / "定时发布" 等非目标按钮
-    CONFIRM_TEXTS = ("发布", "确定发布", "确认发布", "发表")
-    for attempt in range(30):
-        try:
-            btn = page.locator(f'xpath={CONFIRM_XPATH}').first
-            if btn.is_visible():
-                text = (btn.inner_text() or "").strip()
-                # 只有精确匹配确认文本才点击, 避免误点"定时发布"/"预览并发布"
-                if text in CONFIRM_TEXTS:
-                    btn.click(force=True, timeout=3000)
-                    print(f"  ✓ 已点击确定发布按钮 (文本: {text})")
-                    return
-        except Exception:
-            pass
-        time.sleep(1)
-
-    # 2) 兜底: 遍历可见按钮, 精确匹配确认文本, 排除"预览并发布"/"定时发布"
     try:
-        for _ in range(10):
-            buttons = page.locator("button:visible")
-            count = buttons.count()
-            for i in range(count):
-                try:
-                    b = buttons.nth(i)
-                    text = (b.inner_text() or "").strip()
-                    if text in CONFIRM_TEXTS:
-                        b.click(force=True, timeout=3000)
-                        print(f"  ✓ 已点击确定发布按钮 (兜底, 文本: {text})")
-                        return
-                except Exception:
-                    continue
-            time.sleep(1)
+        cls = (btn.get_attribute("class") or "").lower()
+        if "loading" in cls or "disabled" in cls:
+            return False
+        if not btn.is_visible():
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _find_confirm_button(page, frame=None):
+    """
+    在指定文档(主文档或iframe)中查找确定发布按钮, 返回可点击的 locator 或 None
+
+    优先用独特 class 定位, 再 XPath, 最后精确匹配文本;
+    排除 "预览并发布" / "定时发布" 等非目标按钮;
+    按钮处于 loading/disabled 状态时视为未就绪, 返回 None 等待下一轮。
+    """
+    CONFIRM_TEXTS = ("发布", "确定发布", "确认发布", "发表")
+    doc = frame if frame is not None else page
+    # 1) 独特 class 定位 (最高优先级): button.publish-btn.publish-btn-last
+    try:
+        btn = doc.locator(CONFIRM_CSS).first
+        if btn.is_visible():
+            text = (btn.inner_text() or "").strip()
+            if (text in CONFIRM_TEXTS or "发布" in text) and _is_btn_ready(btn):
+                return btn
     except Exception:
         pass
+    # 2) 用户提供的精确 XPath (主文档时)
+    if frame is None:
+        try:
+            btn = doc.locator(f'xpath={CONFIRM_XPATH}').first
+            if btn.is_visible():
+                text = (btn.inner_text() or "").strip()
+                if text in CONFIRM_TEXTS and _is_btn_ready(btn):
+                    return btn
+        except Exception:
+            pass
+    # 3) 遍历可见按钮精确匹配文本
+    try:
+        buttons = doc.locator("button:visible")
+        count = buttons.count()
+        for i in range(count):
+            try:
+                b = buttons.nth(i)
+                text = (b.inner_text() or "").strip()
+                if text in CONFIRM_TEXTS and _is_btn_ready(b):
+                    return b
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
 
-    # 3) 仍未找到, 提示人工确认 (不再误点"预览并发布")
+
+def _confirm_publish_if_needed(page, context=None):
+    """
+    点击预览发布后, 等待确认发布弹窗加载完成, 再点击确定发布按钮
+
+    关键点: 预览发布后头条会在当前标签页弹出新弹窗(可能是新标签页 /
+    iframe 浮层 / 主文档浮层), 弹窗需要时间加载。因此轮询最长 30s,
+    每轮依次检测: 新标签页 → iframe → 主文档, 优先用独特 class
+    button.publish-btn.publish-btn-last 定位 "确认发布" 按钮,
+    再 XPath / 文本精确匹配兜底, 排除 "预览并发布"/"定时发布"。
+    """
+    CONFIRM_TEXTS = ("发布", "确定发布", "确认发布", "发表")
+    CLICK_TIMEOUT = 5000  # 按钮可能随 React 重渲染 detached, 给足点击时间
+
+    for attempt in range(30):
+        clicked = False
+
+        # 1) 新标签页检测 (预览弹窗可能开在新标签)
+        if context is not None:
+            try:
+                for pg in context.pages:
+                    if pg is page:
+                        continue
+                    btn = _find_confirm_button(pg)
+                    if btn is not None:
+                        try:
+                            btn.click(force=True, timeout=CLICK_TIMEOUT)
+                            print(f"  ✓ 已在新标签页点击确定发布按钮 (文本: {btn.inner_text().strip()})")
+                            clicked = True
+                        except Exception:
+                            print("  …新标签页按钮点击未完成(可能仍在加载), 继续等待")
+                        break
+            except Exception:
+                pass
+            if clicked:
+                return
+
+        # 2) iframe 检测 (预览弹窗可能是 iframe 浮层)
+        try:
+            for fr in page.frames:
+                if fr is page.main_frame:
+                    continue
+                btn = _find_confirm_button(page, fr)
+                if btn is not None:
+                    try:
+                        btn.click(force=True, timeout=CLICK_TIMEOUT)
+                        print(f"  ✓ 已在弹窗(iframe)中点击确定发布按钮 (文本: {btn.inner_text().strip()})")
+                        clicked = True
+                    except Exception:
+                        print("  …弹窗(iframe)按钮点击未完成(可能仍在加载), 继续等待")
+                    break
+        except Exception:
+            pass
+        if clicked:
+            return
+
+        # 3) 主文档检测
+        btn = _find_confirm_button(page)
+        if btn is not None:
+            try:
+                btn.click(force=True, timeout=CLICK_TIMEOUT)
+                print(f"  ✓ 已点击确定发布按钮 (文本: {btn.inner_text().strip()})")
+                return
+            except Exception:
+                print("  …主文档按钮点击未完成(可能仍在加载), 继续等待")
+
+        time.sleep(1)
+
+    # 仍未找到, 提示人工确认 (不再误点"预览并发布"/"定时发布")
     print("  ⚠ 未找到确定发布按钮, 已跳过确认 (请人工在浏览器中确认发布)")
 
 

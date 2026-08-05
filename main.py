@@ -61,6 +61,7 @@ class RunAction(BaseModel):
     content: Optional[str] = None
     title: Optional[str] = None
     file_path: Optional[str] = None  # 文件上传型平台需要原始文件路径
+    folder_path: Optional[str] = None  # 携程图文: 图文文件夹路径 (含图片+word)
     headless: Optional[bool] = None  # 自动打开浏览器时的无头模式 (None 时使用默认 False)
 
 class OpenBrowserRequest(BaseModel):
@@ -93,8 +94,7 @@ def enrich_platform(config: dict) -> dict:
     config["auth_expiry"] = expiry_ts
     if expiry_ts:
         try:
-            from datetime import datetime as _dt
-            config["auth_expiry_text"] = _dt.fromtimestamp(expiry_ts).strftime("%Y-%m-%d")
+            config["auth_expiry_text"] = datetime.fromtimestamp(expiry_ts).strftime("%Y-%m-%d")
             config["auth_expiry_days"] = max(0, int((expiry_ts - time.time()) // 86400))
         except Exception:
             config["auth_expiry_text"] = None
@@ -102,6 +102,27 @@ def enrich_platform(config: dict) -> dict:
     else:
         config["auth_expiry_text"] = None
         config["auth_expiry_days"] = None
+
+    # token 过期时间 (access_token / refresh_token 的 JWT exp)
+    token_exp = browser_manager.get_token_expiry(config["id"])
+    config["token_expiry"] = token_exp
+    if token_exp:
+        config["token_access_text"] = (
+            datetime.fromtimestamp(token_exp["access"]).strftime("%Y-%m-%d %H:%M")
+            if token_exp.get("access")
+            else None
+        )
+        config["token_refresh_text"] = (
+            datetime.fromtimestamp(token_exp["refresh"]).strftime("%Y-%m-%d %H:%M")
+            if token_exp.get("refresh")
+            else None
+        )
+        config["token_expires_in"] = token_exp.get("expires_in")
+    else:
+        config["token_access_text"] = None
+        config["token_refresh_text"] = None
+        config["token_expires_in"] = None
+
     plugin_file = config.get("plugin_file", "")
     config["has_plugin"] = bool(plugin_file) and (PLUGINS_DIR / plugin_file).exists()
     return config
@@ -335,6 +356,8 @@ async def run_action(platform_id: str, data: RunAction):
         args["title"] = data.title
     if data.file_path is not None:
         args["file_path"] = data.file_path
+    if data.folder_path is not None:
+        args["folder_path"] = data.folder_path
 
     result = await asyncio.to_thread(
         browser_manager.run_action,
@@ -450,13 +473,71 @@ async def upload_docs(files: List[UploadFile] = File(...)):
     return results
 
 
+# ========== 携程图文目录 API ==========
+
+CTRIP_ROOT_DIR = Path(os.path.expanduser("~")) / "携程"
+CTRIP_PICTURE_TEXT_DIR = CTRIP_ROOT_DIR / "图文"
+CTRIP_VIDEO_DIR = CTRIP_ROOT_DIR / "视频"
+
+# 确保携程目录存在
+for _d in [CTRIP_ROOT_DIR, CTRIP_PICTURE_TEXT_DIR, CTRIP_VIDEO_DIR]:
+    _d.mkdir(parents=True, exist_ok=True)
+
+
+@app.get("/api/ctrip/folders")
+async def list_ctrip_folders():
+    """
+    列出携程图文目录下的待发布文件夹
+
+    每个文件夹 = 一个图文块 (图片 + word文档), 返回文件夹名、
+    图片数量、word文档信息(标题/内容预览/图片数)。
+    """
+    folders = []
+    if not CTRIP_PICTURE_TEXT_DIR.exists():
+        return folders
+    for folder in sorted(CTRIP_PICTURE_TEXT_DIR.iterdir()):
+        if not folder.is_dir():
+            continue
+        # 图片
+        images = []
+        for ext in ("*.jpg", "*.jpeg", "*.png", "*.gif", "*.webp", "*.bmp"):
+            images.extend(folder.glob(ext))
+        # word 文档
+        word_files = list(folder.glob("*.docx")) + list(folder.glob("*.doc"))
+        title = ""
+        content_preview = ""
+        content_len = 0
+        error = None
+        if word_files:
+            try:
+                parsed = parse_docx(str(word_files[0]))
+                title = parsed.get("title", "")
+                html_content = parsed.get("html_content", "")
+                content_len = len(html_content)
+                # 纯文本预览
+                import re as _re
+                content_preview = _re.sub(r"<[^>]+>", "", html_content).strip()[:200]
+            except Exception as e:
+                error = str(e)
+        folders.append({
+            "name": folder.name,
+            "path": str(folder),
+            "image_count": len(images),
+            "images": [img.name for img in sorted(images)],
+            "word_file": word_files[0].name if word_files else None,
+            "title": title,
+            "content_preview": content_preview,
+            "content_len": content_len,
+            "error": error,
+        })
+    return folders
+
+
 @app.on_event("shutdown")
 async def shutdown():
     """关闭所有浏览器"""
     browser_manager.close_all()
 
-
-# ========== 启动 ==========
 
 if __name__ == "__main__":
     print(f"\n{'='*50}")
@@ -465,5 +546,6 @@ if __name__ == "__main__":
     print(f"  平台配置: {PLATFORMS_DIR}")
     print(f"  插件目录: {PLUGINS_DIR}")
     print(f"  浏览器数据: {BROWSER_DATA_DIR}")
+    print(f"  携程图文目录: {CTRIP_PICTURE_TEXT_DIR}")
     print(f"{'='*50}\n")
     uvicorn.run(app, host=HOST, port=PORT, log_level="info")

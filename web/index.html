@@ -667,6 +667,10 @@ main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
           <span class="detail-label">授权有效期</span>
           <span class="detail-value" id="detail-expiry"></span>
         </div>
+        <div class="detail-row" id="detail-token-row" style="display:none;">
+          <span class="detail-label">Token 有效期</span>
+          <span class="detail-value" id="detail-token"></span>
+        </div>
         <div class="detail-row">
           <span class="detail-label">描述</span>
           <span class="detail-value" id="detail-desc"></span>
@@ -687,6 +691,20 @@ main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
           <span>无头模式</span>
         </label>
         <button class="btn btn-success btn-sm" id="btn-distribute-all" onclick="distributeAll()">⚡ 一键分发</button>
+      </div>
+
+      <!-- 携程图文文件夹分发区 (仅携程平台显示) -->
+      <div id="ctrip-section" style="display:none;">
+        <hr class="section-divider">
+        <div class="section-title">🗂 携程图文文件夹</div>
+        <div class="upload-hint" style="margin-bottom:10px;">从携程根目录「图文」下选择待发布文件夹（每个文件夹 = 一个图文块：图片 + Word 内容），可多选</div>
+        <div id="ctrip-folder-list" class="doc-list">
+          <div class="doc-empty">加载中...</div>
+        </div>
+        <div style="margin:10px 0 16px;">
+          <button class="btn btn-primary btn-sm" onclick="loadCtripFolders()">🔄 刷新文件夹</button>
+          <button class="btn btn-success btn-sm" id="btn-ctrip-publish" onclick="ctripPublishSelected()">📤 发布选中图文 (0)</button>
+        </div>
       </div>
 
       <!-- 文档分发区 -->
@@ -926,6 +944,16 @@ async function showDetail(platformId) {
     document.getElementById('error-display').innerHTML = '';
     document.getElementById('distribute-title').value = '';
     document.getElementById('distribute-content').value = '';
+
+    // 携程: 显示图文文件夹区块, 其他平台隐藏
+    const ctripSection = document.getElementById('ctrip-section');
+    if (p.id === 'ctrip') {
+      ctripSection.style.display = 'block';
+      loadCtripFolders();
+    } else {
+      ctripSection.style.display = 'none';
+    }
+
     openModal('detail-modal');
     // 启动日志轮询
     startLogPolling();
@@ -961,6 +989,21 @@ function updateDetailStatus(p) {
     expiryEl.innerHTML = `${expiryText}${dateText}`;
   } else {
     expiryRow.style.display = 'none';
+  }
+  // Token 有效期 (access_token / refresh_token)
+  const tokenRow = document.getElementById('detail-token-row');
+  const tokenEl = document.getElementById('detail-token');
+  if (p.token_access_text || p.token_refresh_text) {
+    tokenRow.style.display = 'flex';
+    let parts = [];
+    if (p.token_access_text) {
+      const expIn = p.token_expires_in != null ? `（剩余 ${Math.floor(p.token_expires_in / 3600)}h）` : '';
+      parts.push(`access: ${p.token_access_text}${expIn}`);
+    }
+    if (p.token_refresh_text) parts.push(`refresh: ${p.token_refresh_text}`);
+    tokenEl.textContent = parts.join('　');
+  } else {
+    tokenRow.style.display = 'none';
   }
 }
 
@@ -1120,6 +1163,91 @@ async function runLogin() {
     showError(e.message);
     showToast('登录失败: ' + e.message.substring(0, 100), 'error');
   }
+}
+
+// ========== 携程图文文件夹 ==========
+let ctripFolders = [];
+let ctripSelected = new Set();
+
+async function loadCtripFolders() {
+  const listEl = document.getElementById('ctrip-folder-list');
+  try {
+    const folders = await api('/api/ctrip/folders');
+    ctripFolders = folders;
+    ctripSelected.clear();
+    renderCtripFolders();
+    updateCtripPublishBtn();
+    if (folders.length === 0) {
+      listEl.innerHTML = '<div class="doc-empty">图文目录下暂无文件夹，请在「用户目录/携程/图文」下创建（每个文件夹放图片 + Word 文档）</div>';
+    }
+  } catch (e) {
+    listEl.innerHTML = `<div class="doc-empty" style="color:var(--danger);">加载失败: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderCtripFolders() {
+  const listEl = document.getElementById('ctrip-folder-list');
+  if (ctripFolders.length === 0) return;
+  listEl.innerHTML = ctripFolders.map((f, idx) => `
+    <div class="doc-item" style="cursor:pointer;border-left:3px solid ${ctripSelected.has(f.path) ? 'var(--primary)' : 'transparent'};"
+         onclick="toggleCtripFolder('${idx}')">
+      <div style="flex:1;">
+        <div style="font-weight:600;">${escapeHtml(f.name)}</div>
+        <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">
+          🖼 ${f.image_count} 张图片 ${f.word_file ? '· 📄 ' + escapeHtml(f.word_file) : '· ⚠ 无Word文档'}
+        </div>
+        ${f.title ? `<div style="font-size:13px;margin-top:2px;"><b>标题:</b> ${escapeHtml(f.title)}</div>` : ''}
+        ${f.content_preview ? `<div style="font-size:12px;color:var(--gray-400);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:520px;">${escapeHtml(f.content_preview)}</div>` : ''}
+        ${f.error ? `<div style="font-size:12px;color:var(--danger);">⚠ ${escapeHtml(f.error)}</div>` : ''}
+      </div>
+      <input type="checkbox" style="margin-left:10px;" ${ctripSelected.has(f.path) ? 'checked' : ''} onchange="toggleCtripFolder('${idx}')">
+    </div>
+  `).join('');
+}
+
+function toggleCtripFolder(idx) {
+  const f = ctripFolders[idx];
+  if (ctripSelected.has(f.path)) {
+    ctripSelected.delete(f.path);
+  } else {
+    ctripSelected.add(f.path);
+  }
+  renderCtripFolders();
+  updateCtripPublishBtn();
+}
+
+function updateCtripPublishBtn() {
+  const btn = document.getElementById('btn-ctrip-publish');
+  btn.textContent = `📤 发布选中图文 (${ctripSelected.size})`;
+  btn.disabled = ctripSelected.size === 0;
+}
+
+async function ctripPublishSelected() {
+  if (ctripSelected.size === 0) {
+    showToast('请先选择图文文件夹', 'warning');
+    return;
+  }
+  if (!currentPlatform) return;
+  // 逐个分发选中的文件夹
+  const paths = Array.from(ctripSelected);
+  for (let i = 0; i < paths.length; i++) {
+    const path = paths[i];
+    const folder = ctripFolders.find(f => f.path === path);
+    const label = folder ? folder.name : path;
+    showToast(`正在分发 (${i + 1}/${paths.length}): ${label}`, 'info');
+    try {
+      await api(`/api/platforms/${currentPlatform.id}/run`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'distribute', folder_path: path, headless: false }),
+      });
+      showToast(`✅ 分发完成: ${label}`, 'success');
+    } catch (e) {
+      showError(`${label} 分发失败: ${e.message}`);
+      showToast(`❌ 分发失败: ${label}`, 'error');
+    }
+  }
+  loadPlatforms();
+  loadCtripFolders();
 }
 
 // ========== 文档上传与解析 ==========
