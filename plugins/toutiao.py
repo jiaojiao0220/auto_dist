@@ -433,35 +433,50 @@ CONFIRM_XPATH = '//*[@id="root"]/div/div[1]/div/div[3]/div/button[2]/span'
 
 
 def _confirm_publish_if_needed(page):
-    """点击预览发布后, 点击"确定发布"确认按钮"""
-    # 1) 用户提供的精确 XPath (最高优先级)
-    try:
-        btn = page.locator(f'xpath={CONFIRM_XPATH}')
-        btn.wait_for(state="visible", timeout=8000)
-        btn.click(force=True, timeout=5000)
-        print("  ✓ 已点击确定发布按钮 (用户XPath)")
-        return
-    except Exception as e:
-        print(f"  确定发布按钮(XPath)未出现或点击失败: {e}")
+    """
+    点击预览发布后, 等待预览发布界面加载完成, 再点击确定发布按钮
 
-    # 2) 常见确认按钮文本兜底
-    try:
-        for text in ["发布", "确认发布", "发表", "确定"]:
-            try:
-                btn = page.locator(f'button:has-text("{text}")').last
-                if btn.is_visible():
-                    btn.click(force=True, timeout=3000)
-                    print(f"  已点击确认发布按钮[{text}]")
-                    return
-            except Exception:
-                continue
-        # 若没有弹窗按钮, 按 Escape 关闭
+    关键点: 点击预览发布后界面需要时间加载(按钮处于 loading / 文本仍为
+    "预览并发布"), 必须等加载完成、按钮文本变为"发布"后才能点击。
+    期间同一 XPath 可能匹配到 2 个元素(loading 包装 span + 正常 span),
+    因此用 .first 规避 strict mode, 并按文本排除"预览"状态。
+    """
+    # 1) 轮询等待预览界面加载完成 + 点击确定发布 (最长 30s, 每 1s 检查)
+    for attempt in range(30):
         try:
-            page.keyboard.press("Escape")
+            btn = page.locator(f'xpath={CONFIRM_XPATH}').first
+            if btn.is_visible():
+                text = (btn.inner_text() or "").strip()
+                # 文本仍含"预览"(如"预览并发布")→ 界面还没加载完, 继续等
+                if "预览" not in text and text:
+                    btn.click(force=True, timeout=3000)
+                    print(f"  ✓ 已点击确定发布按钮 (文本: {text})")
+                    return
         except Exception:
             pass
+        time.sleep(1)
+
+    # 2) 兜底: 遍历可见按钮, 精确匹配"发布/确定发布/确认发布/发表", 排除"预览"
+    try:
+        for _ in range(10):
+            buttons = page.locator("button:visible")
+            count = buttons.count()
+            for i in range(count):
+                try:
+                    b = buttons.nth(i)
+                    text = (b.inner_text() or "").strip()
+                    if text in ("发布", "确定发布", "确认发布", "发表"):
+                        b.click(force=True, timeout=3000)
+                        print(f"  ✓ 已点击确定发布按钮 (兜底, 文本: {text})")
+                        return
+                except Exception:
+                    continue
+            time.sleep(1)
     except Exception:
         pass
+
+    # 3) 仍未找到, 提示人工确认 (不再误点"预览并发布")
+    print("  ⚠ 未找到确定发布按钮, 已跳过确认 (请人工在浏览器中确认发布)")
 
 
 def on_close(page, context):
