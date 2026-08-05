@@ -7,6 +7,7 @@ import traceback
 import logging
 import io
 import sys
+import json
 from collections import deque
 from pathlib import Path
 from typing import Dict, Callable, Optional, Any, List
@@ -148,6 +149,7 @@ class BrowserInstance:
         self.running = False
         self.error: Optional[str] = None
         self.auth_status: Optional[bool] = None
+        self.auth_expiry: Optional[float] = None  # 授权过期时间 (Unix 秒), 取最早过期的持久 cookie
         self.logs = LogCollector()
         self._ready = threading.Event()  # 初始 on_open + is_logged_in 完成后置位
 
@@ -231,6 +233,23 @@ class BrowserInstance:
                         self.auth_status = bool(call_plugin_func(self.plugin["is_logged_in"], page, context))
                     except Exception:
                         pass
+
+                # 读取授权 cookie 过期时间
+                # 策略: 取持久 cookie 中最晚过期的时间作为授权失效点
+                # (最早过期的往往是短期临时 cookie, 不代表登录态失效; 最晚的才是登录态有效期)
+                try:
+                    cookies = context.cookies()
+                    expires_list = [
+                        float(c.get("expires", -1))
+                        for c in cookies
+                        if c.get("expires", -1) and float(c.get("expires", -1)) > 0
+                    ]
+                    if expires_list:
+                        self.auth_expiry = max(expires_list)
+                    else:
+                        self.auth_expiry = None
+                except Exception:
+                    self.auth_expiry = None
 
                 # 初始 on_open + is_logged_in 完成，标记就绪
                 self._ready.set()
@@ -409,6 +428,40 @@ class BrowserManager:
         if instance:
             return instance.auth_status
         return None
+
+    # ========== 授权过期时间 ==========
+    AUTH_EXPIRY_CACHE_FILE = "auth_expiry.json"
+
+    def _auth_expiry_cache_path(self) -> Path:
+        return self.browser_data_dir / self.AUTH_EXPIRY_CACHE_FILE
+
+    def get_auth_expiry(self, platform_id: str) -> Optional[float]:
+        """获取平台授权过期时间 (Unix 秒); 浏览器打开时读实时值, 否则读缓存"""
+        instance = self.instances.get(platform_id)
+        if instance and instance.auth_expiry is not None:
+            self._save_auth_expiry_cache(platform_id, instance.auth_expiry)
+            return instance.auth_expiry
+        # 浏览器未打开, 读缓存
+        return self._load_auth_expiry_cache().get(platform_id)
+
+    def _save_auth_expiry_cache(self, platform_id: str, expiry: float) -> None:
+        try:
+            cache = self._load_auth_expiry_cache()
+            cache[platform_id] = expiry
+            self._auth_expiry_cache_path().write_text(
+                json.dumps(cache, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def _load_auth_expiry_cache(self) -> dict:
+        try:
+            path = self._auth_expiry_cache_path()
+            if path.exists():
+                return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return {}
 
     def run_action(self, platform_id: str, func_name: str, **args) -> Dict[str, Any]:
         instance = self.instances.get(platform_id)

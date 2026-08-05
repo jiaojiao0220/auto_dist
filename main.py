@@ -5,6 +5,7 @@ import os
 import asyncio
 import shutil
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
@@ -87,6 +88,20 @@ def enrich_platform(config: dict) -> dict:
     """给平台配置添加运行时状态"""
     config["browser_open"] = browser_manager.is_open(config["id"])
     config["auth_status"] = browser_manager.get_auth_status(config["id"])
+    # 授权过期时间: Unix 秒 + 人类可读文本 + 剩余天数
+    expiry_ts = browser_manager.get_auth_expiry(config["id"])
+    config["auth_expiry"] = expiry_ts
+    if expiry_ts:
+        try:
+            from datetime import datetime as _dt
+            config["auth_expiry_text"] = _dt.fromtimestamp(expiry_ts).strftime("%Y-%m-%d")
+            config["auth_expiry_days"] = max(0, int((expiry_ts - time.time()) // 86400))
+        except Exception:
+            config["auth_expiry_text"] = None
+            config["auth_expiry_days"] = None
+    else:
+        config["auth_expiry_text"] = None
+        config["auth_expiry_days"] = None
     plugin_file = config.get("plugin_file", "")
     config["has_plugin"] = bool(plugin_file) and (PLUGINS_DIR / plugin_file).exists()
     return config
