@@ -379,6 +379,9 @@ async def run_action(platform_id: str, data: RunAction):
         platform_name = config.get("name", "未知平台")
         append_excel_record(title, platform_name)
         logger.info(f"已记录分发: {title} -> {platform_name}")
+        # 携程平台: 记录已发布图文 (供前端筛选)
+        if config.get("id") == "ctrip" and data.folder_path:
+            _record_ctrip_publish(data.folder_path)
 
     return result
 
@@ -478,10 +481,39 @@ async def upload_docs(files: List[UploadFile] = File(...)):
 CTRIP_ROOT_DIR = Path(os.path.expanduser("~")) / "携程"
 CTRIP_PICTURE_TEXT_DIR = CTRIP_ROOT_DIR / "图文"
 CTRIP_VIDEO_DIR = CTRIP_ROOT_DIR / "视频"
+CTRIP_PUBLISH_LOG = CTRIP_ROOT_DIR / "publish_log.json"
 
 # 确保携程目录存在
 for _d in [CTRIP_ROOT_DIR, CTRIP_PICTURE_TEXT_DIR, CTRIP_VIDEO_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
+
+
+def _load_ctrip_publish_log() -> dict:
+    """加载携程发布日志 {路径: 发布时间}"""
+    try:
+        if CTRIP_PUBLISH_LOG.exists():
+            return json.loads(CTRIP_PUBLISH_LOG.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_ctrip_publish_log(log: dict) -> None:
+    """保存携程发布日志"""
+    try:
+        CTRIP_PUBLISH_LOG.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _record_ctrip_publish(folder_path: str) -> None:
+    """记录携程图文发布"""
+    from datetime import datetime as _dt
+    log = _load_ctrip_publish_log()
+    # 归一化路径: 统一用反斜杠 (Windows) 或 Path 对象比较
+    norm_path = str(Path(folder_path))
+    log[norm_path] = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    _save_ctrip_publish_log(log)
 
 
 IMAGE_EXTS = ("*.jpg", "*.jpeg", "*.png", "*.gif", "*.webp", "*.bmp")
@@ -506,6 +538,7 @@ def _scan_ctrip_picture_text(root: Path) -> list:
     - 一般一个文件夹最多一个 word 文档 (取第一个)
     """
     results = []
+    pub_log = _load_ctrip_publish_log()
 
     def walk(current: Path, rel: str):
         # 当前文件夹是否含 word 文档 → 是则为一个图文块 (先判断自身, 再递归子目录)
@@ -546,6 +579,12 @@ def _scan_ctrip_picture_text(root: Path) -> list:
                 walk(child, f"{rel}{current.name}/")
 
     walk(root, "")
+    # 标记发布状态 (归一化路径比较)
+    pub_keys = {str(Path(k)): v for k, v in pub_log.items()}
+    for r in results:
+        norm_path = str(Path(r["path"]))
+        r["published"] = norm_path in pub_keys
+        r["publish_time"] = pub_keys.get(norm_path)
     # 按路径排序
     results.sort(key=lambda x: x["path"])
     return results

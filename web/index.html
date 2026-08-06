@@ -488,6 +488,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
 }
 .ctrip-table tr:hover { background: var(--gray-50); }
 .ctrip-row-selected { background: rgba(59,130,246,0.06); }
+.ctrip-row-published { background: rgba(34,197,94,0.05); color: var(--gray-500); }
+.ctrip-row-published .ctrip-title-text { color: var(--gray-500); }
 .ctrip-title-cell { cursor: pointer; }
 .ctrip-title-text { color: var(--gray-800); }
 
@@ -722,7 +724,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
       <!-- 携程图文文件夹分发区 (仅携程平台显示) -->
       <div id="ctrip-section" style="display:none;">
         <hr class="section-divider">
-        <div class="section-title">🗂 携程图文文件夹</div>
+        <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;">
+          <span>🗂 携程图文文件夹</span>
+          <select id="ctrip-filter" onchange="onCtripFilterChange()" style="font-size:12px;padding:3px 8px;border-radius:4px;border:1px solid var(--gray-300);">
+            <option value="all">全部</option>
+            <option value="unpublished">未发布</option>
+            <option value="published">已发布</option>
+          </select>
+        </div>
         <div class="upload-hint" style="margin-bottom:10px;">从携程根目录「图文」下选择待发布文件夹（每个文件夹 = 一个图文块：图片 + Word 内容），可多选</div>
         <div id="ctrip-folder-list" class="doc-list">
           <div class="doc-empty">加载中...</div>
@@ -1194,6 +1203,13 @@ async function runLogin() {
 // ========== 携程图文文件夹 ==========
 let ctripFolders = [];
 let ctripSelected = new Set();
+let ctripFilter = 'all';
+
+function onCtripFilterChange() {
+  ctripFilter = document.getElementById('ctrip-filter').value;
+  renderCtripFolders();
+  updateCtripPublishBtn();
+}
 
 async function loadCtripFolders() {
   const listEl = document.getElementById('ctrip-folder-list');
@@ -1216,6 +1232,8 @@ function renderCtripFolders() {
   if (ctripFolders.length === 0) return;
   // 初始化每个 folder 的 custom_title (缺省用原始标题)
   ctripFolders.forEach(f => { if (!f.custom_title) f.custom_title = f.title || ''; });
+  // 筛选
+  const filtered = ctripFilter === 'all' ? ctripFolders : ctripFolders.filter(f => ctripFilter === 'published' ? f.published : !f.published);
   listEl.innerHTML = `<table class="ctrip-table">
     <thead><tr>
       <th style="width:25%;">标题（双击编辑）</th>
@@ -1224,7 +1242,7 @@ function renderCtripFolders() {
       <th style="width:10%;text-align:center;">选择</th>
     </tr></thead>
     <tbody>
-      ${ctripFolders.map((f, idx) => {
+      ${filtered.map((f, idx) => {
         const effTitle = f.custom_title || f.title || '';
         const tLen = effTitle.length || 0;
         const warn = tLen < 5 || tLen > 20;
@@ -1234,7 +1252,7 @@ function renderCtripFolders() {
         const warnMsg2 = warn ? (' ⚠ ' + tLen + '字，超过20字限制') : '';
         const warnHtml = warn ? ('<span style=\"font-size:11px;color:var(--danger);\">' + (tLen < 5 ? warnMsg : warnMsg2) + '</span>') : '';
         return '' +
-        '<tr class="' + (ctripSelected.has(f.path) ? 'ctrip-row-selected' : '') + '">' +
+        '<tr class="' + (ctripSelected.has(f.path) ? 'ctrip-row-selected' : '') + (f.published ? ' ctrip-row-published' : '') + '">' +
           '<td class="ctrip-title-cell" ondblclick="startEditCtripTitle(this, \'' + idx + '\')" title="' + escapeHtml(effTitle || '双击编辑') + '">' +
             '<span class="ctrip-title-text" style="' + warnStyle + '">' + escapeHtml(effTitle || '(无标题)') + warnIcon + '</span>' +
             warnHtml +
