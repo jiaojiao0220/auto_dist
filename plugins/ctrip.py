@@ -135,6 +135,23 @@ def login(page, context):
         print("登录超时, 请检查浏览器窗口或重试")
 
 
+MAX_TITLE_LEN = 20  # 携程标题上限 (中文/字符各算 1 字)
+MIN_TITLE_LEN = 5   # 携程标题下限
+
+
+def _normalize_title(title: str) -> str:
+    """规范化标题: 超过 20 字截断, 不足 5 字警告但保留原样 (用户可前端编辑)"""
+    if not title:
+        return title
+    title = title.strip()
+    if len(title) > MAX_TITLE_LEN:
+        print(f"  ⚠ 标题超长 ({len(title)} > {MAX_TITLE_LEN} 字), 截断为: {title[:MAX_TITLE_LEN]}")
+        title = title[:MAX_TITLE_LEN]
+    if len(title) < MIN_TITLE_LEN:
+        print(f"  ⚠ 标题过短 ({len(title)} < {MIN_TITLE_LEN} 字), 携程要求 5-20 字, 建议前端编辑")
+    return title
+
+
 def distribute(page, context, title=None, content=None, folder_path=None):
     """
     分发内容到携程
@@ -170,6 +187,11 @@ def distribute(page, context, title=None, content=None, folder_path=None):
     parsed = doc_parser.parse_docx(word_file)
     f_title = parsed.get("title", "")
     f_content = parsed.get("html_content", "")
+    # 前端可传自定义标题 (编辑后), 未传则用 word 标题
+    if title and title.strip():
+        f_title = title.strip()
+    # 携程标题限制 5-20 字 (每个字符/汉字算 1 字)
+    f_title = _normalize_title(f_title)
     print(f"  标题: {f_title}")
     print(f"  内容长度: {len(f_content)} 字符")
 

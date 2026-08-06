@@ -465,6 +465,32 @@ main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
   font-size: 13px;
 }
 
+/* 携程图文表格 */
+.ctrip-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.ctrip-table thead th {
+  text-align: left;
+  padding: 6px 8px;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  font-weight: 500;
+  border-bottom: 2px solid var(--gray-200);
+  position: sticky;
+  top: 0;
+}
+.ctrip-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--gray-200);
+  vertical-align: middle;
+}
+.ctrip-table tr:hover { background: var(--gray-50); }
+.ctrip-row-selected { background: rgba(59,130,246,0.06); }
+.ctrip-title-cell { cursor: pointer; }
+.ctrip-title-text { color: var(--gray-800); }
+
 /* Section divider */
 .section-divider {
   border: none;
@@ -1188,21 +1214,59 @@ async function loadCtripFolders() {
 function renderCtripFolders() {
   const listEl = document.getElementById('ctrip-folder-list');
   if (ctripFolders.length === 0) return;
-  listEl.innerHTML = ctripFolders.map((f, idx) => `
-    <div class="doc-item" style="cursor:pointer;border-left:3px solid ${ctripSelected.has(f.path) ? 'var(--primary)' : 'transparent'};"
-         onclick="toggleCtripFolder('${idx}')">
-      <div style="flex:1;">
-        <div style="font-weight:600;">${escapeHtml(f.name)}</div>
-        <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">
-          🖼 ${f.image_count} 张图片 ${f.word_file ? '· 📄 ' + escapeHtml(f.word_file) : '· ⚠ 无Word文档'}
-        </div>
-        ${f.title ? `<div style="font-size:13px;margin-top:2px;"><b>标题:</b> ${escapeHtml(f.title)}</div>` : ''}
-        ${f.content_preview ? `<div style="font-size:12px;color:var(--gray-400);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:520px;">${escapeHtml(f.content_preview)}</div>` : ''}
-        ${f.error ? `<div style="font-size:12px;color:var(--danger);">⚠ ${escapeHtml(f.error)}</div>` : ''}
-      </div>
-      <input type="checkbox" style="margin-left:10px;" ${ctripSelected.has(f.path) ? 'checked' : ''} onchange="toggleCtripFolder('${idx}')">
-    </div>
-  `).join('');
+  // 初始化每个 folder 的 custom_title (缺省用原始标题)
+  ctripFolders.forEach(f => { if (!f.custom_title) f.custom_title = f.title || ''; });
+  listEl.innerHTML = `<table class="ctrip-table">
+    <thead><tr>
+      <th style="width:25%;">标题（双击编辑）</th>
+      <th style="width:10%;text-align:center;">图片</th>
+      <th style="width:55%;">内容预览</th>
+      <th style="width:10%;text-align:center;">选择</th>
+    </tr></thead>
+    <tbody>
+      ${ctripFolders.map((f, idx) => `
+        <tr class="${ctripSelected.has(f.path) ? 'ctrip-row-selected' : ''}">
+          <td class="ctrip-title-cell" ondblclick="startEditCtripTitle(this, '${idx}')" title="${escapeHtml(f.title || '')}，双击可编辑">
+            <span class="ctrip-title-text">${escapeHtml(f.custom_title || f.title || '(无标题)')}</span>
+          </td>
+          <td style="text-align:center;">${f.image_count} 张</td>
+          <td style="font-size:12px;color:var(--gray-500);max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(f.content_preview || '')}</td>
+          <td style="text-align:center;"><input type="checkbox" ${ctripSelected.has(f.path) ? 'checked' : ''} onchange="toggleCtripFolder('${idx}')"></td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>`;
+}
+
+function startEditCtripTitle(cell, idx) {
+  const f = ctripFolders[idx];
+  if (!f) return;
+  const span = cell.querySelector('.ctrip-title-text');
+  const orig = f.custom_title || f.title || '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = orig;
+  input.style.cssText = 'width:100%;padding:2px 4px;border:1px solid var(--primary);border-radius:3px;font-size:13px;';
+  input.onblur = () => finishEditCtripTitle(cell, idx, input.value);
+  input.onkeydown = (e) => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = orig; input.blur(); } };
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+function finishEditCtripTitle(cell, idx, newTitle) {
+  const f = ctripFolders[idx];
+  if (!f) return;
+  newTitle = (newTitle || '').trim();
+  f.custom_title = newTitle;
+  // 恢复 span
+  const input = cell.querySelector('input');
+  if (input) {
+    const span = document.createElement('span');
+    span.className = 'ctrip-title-text';
+    span.textContent = newTitle || f.title || '(无标题)';
+    input.replaceWith(span);
+  }
 }
 
 function toggleCtripFolder(idx) {
@@ -1212,6 +1276,7 @@ function toggleCtripFolder(idx) {
   } else {
     ctripSelected.add(f.path);
   }
+  // 只刷新行样式，不全量重渲染（保留编辑状态）
   renderCtripFolders();
   updateCtripPublishBtn();
 }
@@ -1234,11 +1299,13 @@ async function ctripPublishSelected() {
     const path = paths[i];
     const folder = ctripFolders.find(f => f.path === path);
     const label = folder ? folder.name : path;
+    // 使用编辑后的标题 (如果有自定义标题则覆盖 word 标题)
+    const edTitle = (folder && folder.custom_title) ? folder.custom_title : '';
     showToast(`正在分发 (${i + 1}/${paths.length}): ${label}`, 'info');
     try {
       await api(`/api/platforms/${currentPlatform.id}/run`, {
         method: 'POST',
-        body: JSON.stringify({ action: 'distribute', folder_path: path, headless: false }),
+        body: JSON.stringify({ action: 'distribute', folder_path: path, title: edTitle, headless: false }),
       });
       showToast(`✅ 分发完成: ${label}`, 'success');
     } catch (e) {
