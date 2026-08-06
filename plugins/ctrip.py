@@ -34,7 +34,7 @@ TITLE_CONTAINER_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]
 # Draft.js contenteditable 根元素 (输入必须作用于它, div[4]/div[2]/div[1]/div[2]/div[1])
 TITLE_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[4]/div[2]/div[1]/div[2]/div[1]'
 CONTENT_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[5]/div[3]/div/div[2]/div'
-ADDRESS_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[9]/div/div'
+ADDRESS_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[9]/div'
 PUBLISH_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[14]/div/button[2]/span'
 
 MAX_IMAGES = 20  # 图文最多 20 张图片
@@ -290,8 +290,8 @@ def _distribute_picture_text(page, context, title, content, image_paths):
 
     time.sleep(2)
 
-    # ========== 5. 提取地址并输入 ==========
-    print("[5/6] 处理地址...")
+    # ========== 5. 提取地址并输入 (必填项) ==========
+    print("[5/6] 处理地址 (必填项)...")
     address = _extract_address(content)
     if address:
         print(f"  从内容提取到地址: {address}")
@@ -301,7 +301,7 @@ def _distribute_picture_text(page, context, title, content, image_paths):
         except Exception as e:
             print(f"  ✗ 地址处理失败: {e}")
     else:
-        print("  内容中无地址, 跳过")
+        print("  ⚠ 未从内容提取到地址 (文档中应有「地址：xxx」前缀), 地址为必填项, 发布可能失败")
 
     time.sleep(1)
 
@@ -612,50 +612,73 @@ def _extract_address(content):
 
 
 def _input_address(page, address):
-    """输入地址并在下拉列表中选择第一个/最接近的地址"""
+    """
+    输入地址并在下拉列表中选择第一个/最接近的地址 (必选项)
+
+    地址框是 Ant Design Select 组件 (容器 div[9]/div, 内部 input 是
+    ant-select-selection-search-input)。输入后前端会发请求返回贴近的地点,
+    不一定完全匹配 → 默认选第一个选项。
+    """
+    input_el = None
+
+    # 1) 定位地址输入框: 用户容器 XPath → 内部 ant-select 搜索输入框
     try:
-        addr_box = page.locator(f'xpath={ADDRESS_XPATH}')
-        addr_box.wait_for(state="visible", timeout=10000)
-        addr_box.click(force=True, timeout=5000)
-        time.sleep(0.5)
-        # 先尝试 fill, 失败则用键盘输入
+        container = page.locator(f'xpath={ADDRESS_XPATH}')
+        container.wait_for(state="visible", timeout=10000)
+        # Ant Design Select: 点击容器展开, 内部有隐藏的搜索 input
+        container.click(force=True, timeout=5000)
+        time.sleep(0.8)
+        input_el = page.locator(f'{ADDRESS_XPATH}//input | input.ant-select-selection-search-input').first
         try:
-            addr_box.fill("")
+            input_el.wait_for(state="visible", timeout=5000)
+        except Exception:
+            # 隐藏 input 也直接用它
+            input_el = page.locator('input.ant-select-selection-search-input').first
+            input_el.wait_for(state="attached", timeout=5000)
+    except Exception as e:
+        print(f"  ✗ 地址容器定位失败: {e}")
+
+    # 2) 输入地址文本
+    try:
+        if input_el is None:
+            raise Exception("未定位到地址输入框")
+        input_el.click(force=True, timeout=3000)
+        time.sleep(0.3)
+        try:
+            input_el.fill("")
         except Exception:
             page.keyboard.press("Control+A")
             page.keyboard.press("Backspace")
-        addr_box.type(address, delay=50)
+        input_el.type(address, delay=50)
         print(f"  已输入地址: {address}")
     except Exception as e:
-        print(f"  ✗ 地址输入框定位失败: {e}")
-        # 兜底
+        print(f"  ✗ 地址输入失败: {e}")
+        # 兜底: 直接用键盘
         try:
-            loc = page.locator('input[placeholder*="地址"], input[placeholder*="位置"], [contenteditable="true"][data-placeholder*="地址"]').first
-            loc.click(force=True, timeout=3000)
-            try:
-                loc.fill("")
-            except Exception:
-                page.keyboard.press("Control+A")
-                page.keyboard.press("Backspace")
-            loc.type(address, delay=50)
-            print("  已通过兜底选择器输入地址")
+            container = page.locator(f'xpath={ADDRESS_XPATH}')
+            container.click(force=True, timeout=3000)
+            page.keyboard.press("Control+A")
+            page.keyboard.press("Backspace")
+            page.keyboard.type(address, delay=50)
+            print("  已通过键盘输入地址")
         except Exception as e2:
             raise Exception(f"地址输入失败: {e2}")
 
-    # 等待下拉列表出现, 选择第一个/最接近的选项 (最长 15s)
+    # 3) 等待下拉列表出现 (输入后前端发请求返回贴近地点, 最长 15s)
     selected = False
     for attempt in range(15):
         try:
-            # 下拉选项: 常见类名 + 可见 + 有文本 (排除输入框本身)
             selectors = [
+                # Ant Design Select 选项
+                '.ant-select-item-option:visible',
+                '.ant-select-item:visible',
+                '.ant-select-dropdown-menu-item:visible',
+                '.ant-select-dropdown [class*="option"]:visible',
+                # 通用
                 '[class*="option"]:visible',
                 '[class*="dropdown"] [class*="item"]:visible',
-                '[class*="dropdown"] li:visible',
-                '[class*="search"] [class*="result"]:visible',
                 '[class*="suggestion"]:visible',
-                '[class*="suggest"] [class*="item"]:visible',
                 '[class*="list"] li:visible',
-                'ul[class*="dropdown"] li:visible',
             ]
             for sel in selectors:
                 try:
@@ -666,10 +689,15 @@ def _input_address(page, address):
                             txt = (options.nth(i).inner_text() or "").strip()
                         except Exception:
                             continue
-                        # 取第一个有内容的选项 (即最接近的地址)
                         if txt and len(txt) > 1:
-                            options.nth(i).click(force=True, timeout=3000)
-                            print(f"  ✓ 已选择下拉地址选项 (第{i+1}个): {txt[:40]}")
+                            # 优先精确包含地址文本的选项, 否则取第一个
+                            if address in txt or txt in address or any(k in txt for k in address[:4]):
+                                options.nth(i).click(force=True, timeout=3000)
+                                print(f"  ✓ 已选择最接近地址的选项 (第{i+1}个): {txt[:50]}")
+                            else:
+                                if i == 0:
+                                    options.nth(i).click(force=True, timeout=3000)
+                                    print(f"  ✓ 已选择第一个地址选项: {txt[:50]}")
                             selected = True
                             break
                     if selected:
@@ -692,7 +720,7 @@ def _input_address(page, address):
             pass
 
     if not selected:
-        print("  ⚠ 未找到地址下拉选项, 可能地址未匹配 (请人工确认)")
+        print("  ⚠ 未找到地址下拉选项, 地址为必填项, 请人工确认")
 
 
 # ========== 视频发布 (预留) ==========
