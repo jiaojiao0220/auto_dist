@@ -413,12 +413,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
   overflow: hidden;
 }
 
-/* Auth expiry in card */
-.platform-expiry {
-  margin-bottom: 8px;
-  font-size: 12px;
-}
-
 /* Document list */
 .doc-list {
   margin-top: 12px;
@@ -691,14 +685,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
           <span class="detail-label">状态</span>
           <span id="detail-status"></span>
         </div>
-        <div class="detail-row" id="detail-expiry-row" style="display:none;">
-          <span class="detail-label">授权有效期</span>
-          <span class="detail-value" id="detail-expiry"></span>
-        </div>
-        <div class="detail-row" id="detail-token-row" style="display:none;">
-          <span class="detail-label">Token 有效期</span>
-          <span class="detail-value" id="detail-token"></span>
-        </div>
         <div class="detail-row">
           <span class="detail-label">描述</span>
           <span class="detail-value" id="detail-desc"></span>
@@ -888,7 +874,6 @@ function renderPlatforms(platforms) {
         </div>
         <div class="platform-url">${escapeHtml(p.url)}</div>
         ${p.description ? `<div class="platform-desc">${escapeHtml(p.description)}</div>` : ''}
-        ${getAuthExpiryText(p) ? `<div class="platform-expiry">${getAuthExpiryText(p)}</div>` : ''}
         <div class="card-actions">
           <button class="btn btn-primary btn-sm" onclick="${openBtnAction}">${openBtnText}</button>
           <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showDetail('${p.id}')">编辑</button>
@@ -908,17 +893,6 @@ function getStatusBadge(p) {
 }
 
 // 授权剩余时间: 返回 "剩余X天" / "今天过期" / "已过期" / "" (无过期时间时不显示)
-function getAuthExpiryText(p) {
-  if (!p.auth_expiry) return '';
-  const now = Date.now();
-  const expiryMs = p.auth_expiry * 1000;
-  const days = Math.ceil((expiryMs - now) / 86400000);
-  if (days <= 0) return '<span class="badge badge-danger">授权已过期</span>';
-  if (days === 1) return '<span class="badge badge-warning">今天过期</span>';
-  if (days <= 7) return `<span class="badge badge-warning">剩余 ${days} 天</span>`;
-  return `<span class="badge badge-success">剩余 ${days} 天</span>`;
-}
-
 function escapeHtml(s) {
   const d = document.createElement('div');
   d.textContent = s || '';
@@ -1013,32 +987,6 @@ function updateDetailStatus(p) {
     el.innerHTML = '<span class="badge badge-gray">未打开</span>';
     document.getElementById('btn-open').style.display = 'inline-flex';
     document.getElementById('btn-close').style.display = 'none';
-  }
-  // 授权有效期 (过期时间 + 剩余天数)
-  const expiryRow = document.getElementById('detail-expiry-row');
-  const expiryEl = document.getElementById('detail-expiry');
-  if (p.auth_expiry) {
-    expiryRow.style.display = 'flex';
-    const expiryText = getAuthExpiryText(p);
-    const dateText = p.auth_expiry_text ? `（${p.auth_expiry_text} 过期）` : '';
-    expiryEl.innerHTML = `${expiryText}${dateText}`;
-  } else {
-    expiryRow.style.display = 'none';
-  }
-  // Token 有效期 (access_token / refresh_token)
-  const tokenRow = document.getElementById('detail-token-row');
-  const tokenEl = document.getElementById('detail-token');
-  if (p.token_access_text || p.token_refresh_text) {
-    tokenRow.style.display = 'flex';
-    let parts = [];
-    if (p.token_access_text) {
-      const expIn = p.token_expires_in != null ? `（剩余 ${Math.floor(p.token_expires_in / 3600)}h）` : '';
-      parts.push(`access: ${p.token_access_text}${expIn}`);
-    }
-    if (p.token_refresh_text) parts.push(`refresh: ${p.token_refresh_text}`);
-    tokenEl.textContent = parts.join('　');
-  } else {
-    tokenRow.style.display = 'none';
   }
 }
 

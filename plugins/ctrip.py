@@ -393,24 +393,24 @@ def _upload_images(page, image_paths):
             except Exception as e2:
                 raise Exception(f"图片上传失败: {e2}")
 
-        # 等待上传完成, 然后关闭文件对话框/取消选择状态
+        # 等待上传完成, 关闭文件对话框/上传弹窗
         time.sleep(3)
-        try:
-            # 按 Esc 关闭可能残留的文件对话框/取消焦点
-            page.keyboard.press("Escape")
-            time.sleep(0.5)
-        except Exception:
-            pass
-        # 若页面上还有"确认/完成/关闭"类的上传确认弹窗, 尝试关闭
-        try:
-            for text in ["确认", "完成", "确定", "关闭", "取消", "Done"]:
-                btn = page.locator(f'button:has-text("{text}")').last
-                if btn.is_visible():
-                    btn.click(force=True, timeout=2000)
-                    print(f"  已关闭上传确认弹窗[{text}]")
-                    break
-        except Exception:
-            pass
+        # 关闭系统级文件对话框 (Playwright set_files 后已自动关, 额外按 Escape 确保)
+        for _ in range(3):
+            try:
+                page.keyboard.press("Escape")
+                time.sleep(0.5)
+            except Exception:
+                pass
+        # 页面上若有"确认/完成/关闭/上传"弹窗, 点击关闭
+        for text in ["确认", "完成", "确定", "关闭", "取消", "Done", "OK", "上传"]:
+            try:
+                btn = page.locator(f'button:has-text("{text}"):visible').last
+                btn.click(force=True, timeout=2000)
+                print(f"  已关闭上传弹窗[{text}]")
+                time.sleep(0.5)
+            except Exception:
+                continue
     except Exception as e:
         raise Exception(f"上传图片失败: {e}")
 

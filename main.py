@@ -89,40 +89,6 @@ def enrich_platform(config: dict) -> dict:
     """给平台配置添加运行时状态"""
     config["browser_open"] = browser_manager.is_open(config["id"])
     config["auth_status"] = browser_manager.get_auth_status(config["id"])
-    # 授权过期时间: Unix 秒 + 人类可读文本 + 剩余天数
-    expiry_ts = browser_manager.get_auth_expiry(config["id"])
-    config["auth_expiry"] = expiry_ts
-    if expiry_ts:
-        try:
-            config["auth_expiry_text"] = datetime.fromtimestamp(expiry_ts).strftime("%Y-%m-%d")
-            config["auth_expiry_days"] = max(0, int((expiry_ts - time.time()) // 86400))
-        except Exception:
-            config["auth_expiry_text"] = None
-            config["auth_expiry_days"] = None
-    else:
-        config["auth_expiry_text"] = None
-        config["auth_expiry_days"] = None
-
-    # token 过期时间 (access_token / refresh_token 的 JWT exp)
-    token_exp = browser_manager.get_token_expiry(config["id"])
-    config["token_expiry"] = token_exp
-    if token_exp:
-        config["token_access_text"] = (
-            datetime.fromtimestamp(token_exp["access"]).strftime("%Y-%m-%d %H:%M")
-            if token_exp.get("access")
-            else None
-        )
-        config["token_refresh_text"] = (
-            datetime.fromtimestamp(token_exp["refresh"]).strftime("%Y-%m-%d %H:%M")
-            if token_exp.get("refresh")
-            else None
-        )
-        config["token_expires_in"] = token_exp.get("expires_in")
-    else:
-        config["token_access_text"] = None
-        config["token_refresh_text"] = None
-        config["token_expires_in"] = None
-
     plugin_file = config.get("plugin_file", "")
     config["has_plugin"] = bool(plugin_file) and (PLUGINS_DIR / plugin_file).exists()
     return config
