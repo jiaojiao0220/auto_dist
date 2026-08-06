@@ -427,6 +427,24 @@ def _write_content(page, content):
     except Exception:
         pass
 
+    # 方式0: 真实键盘输入 (Draft.js 依赖真实事件流, 首选)
+    # HTML 转纯文本, 段落用换行分隔 (Draft.js 将 Enter 识别为分段)
+    try:
+        plain = re.sub(r"</?p[^>]*>", "\n", content)
+        plain = re.sub(r"<br\s*/?>", "\n", plain)
+        plain = re.sub(r"<[^>]+>", "", plain)
+        plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
+        ok = _type_into_contenteditable(page, CONTENT_XPATH, plain)
+        if ok:
+            time.sleep(1)
+            text = _get_content_text(page)
+            if text and len(text.strip()) > 5:
+                print(f"  ✓ 内容已通过真实键盘输入 ({len(plain)} 字符)")
+                return
+            print("  键盘输入后验证文本为空, 尝试其他方式")
+    except Exception as e:
+        print(f"  键盘输入方式失败: {e}")
+
     # 方式1: execCommand insertHTML (按 XPath 精确定位内容区)
     try:
         page.evaluate(
@@ -529,7 +547,16 @@ def _type_into_contenteditable(page, xpath, text):
             let el = null;
             try { el = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) {}
             if (!el) {
-                el = document.querySelector('.public-DraftEditor-content[contenteditable="true"], #root [contenteditable="true"]');
+                // 兜底: 非标题的 contenteditable (标题带 data-placeholder*="标题")
+                const all = document.querySelectorAll('.public-DraftEditor-content[contenteditable="true"]');
+                for (const e of all) {
+                    const ph = (e.getAttribute('data-placeholder') || '') + (e.closest('[data-placeholder]') ? e.closest('[data-placeholder]').getAttribute('data-placeholder') : '');
+                    if (ph.indexOf('标题') === -1) { el = e; break; }
+                }
+                if (!el) {
+                    const all2 = document.querySelectorAll('#root [contenteditable="true"]:not([data-placeholder*="标题"])');
+                    if (all2.length) el = all2[all2.length - 1];
+                }
             }
             if (el) {
                 el.focus();
