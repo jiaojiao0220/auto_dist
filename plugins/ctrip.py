@@ -368,52 +368,14 @@ def _distribute_picture_text(page, context, title, content, image_paths):
 
 
 def _upload_images(page, image_paths):
-    """通过文件选择器上传图片, 上传完成后关闭文件对话框"""
+    """直接通过 input[type=file] 上传图片, 不弹系统文件对话框"""
     try:
-        # 点击上传按钮打开文件对话框
-        upload_btn = page.locator(f'xpath={UPLOAD_XPATH}')
-        upload_btn.wait_for(state="visible", timeout=10000)
-        upload_btn.click(force=True, timeout=5000)
-        time.sleep(1)
-
-        # 使用 Playwright 的 file chooser 处理文件选择
-        from playwright.sync_api import sync_playwright
-        try:
-            with page.expect_file_chooser(timeout=10000) as fc_info:
-                upload_btn.click(force=True, timeout=5000)
-            file_chooser = fc_info.value
-            file_chooser.set_files(image_paths)
-            print(f"  ✓ 已选择 {len(image_paths)} 张图片")
-        except Exception:
-            # 兜底: 直接用 input[type=file] 设置文件
-            try:
-                file_input = page.locator('input[type="file"]').first
-                file_input.set_input_files(image_paths)
-                print(f"  ✓ 已通过 input[type=file] 上传 {len(image_paths)} 张图片")
-            except Exception as e2:
-                raise Exception(f"图片上传失败: {e2}")
-
-        # 等待上传完成, 关闭文件对话框/上传弹窗
-        time.sleep(3)
-        # 关闭系统级文件对话框 (Playwright set_files 后已自动关, 额外按 Escape 确保)
-        for _ in range(3):
-            try:
-                page.keyboard.press("Escape")
-                time.sleep(0.5)
-            except Exception:
-                pass
-        # 页面上若有"确认/完成/关闭/上传"弹窗, 点击关闭
-        for text in ["确认", "完成", "确定", "关闭", "取消", "Done", "OK", "上传"]:
-            try:
-                btn = page.locator(f'button:has-text("{text}"):visible').last
-                btn.click(force=True, timeout=2000)
-                print(f"  已关闭上传弹窗[{text}]")
-                time.sleep(0.5)
-            except Exception:
-                continue
+        file_input = page.locator('input[type="file"]').first
+        file_input.set_input_files(image_paths)
+        print(f"  ✓ 已上传 {len(image_paths)} 张图片")
+        time.sleep(3)  # 等待上传完成
     except Exception as e:
-        raise Exception(f"上传图片失败: {e}")
-
+        raise Exception(f"图片上传失败: {e}")
 
 def _write_content(page, content):
     """
