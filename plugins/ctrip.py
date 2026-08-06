@@ -140,15 +140,15 @@ MIN_TITLE_LEN = 5   # 携程标题下限
 
 
 def _normalize_title(title: str) -> str:
-    """规范化标题: 超过 20 字截断, 不足 5 字警告但保留原样 (用户可前端编辑)"""
+    """标题长度警示: 仅提醒不修改, 用户可前端双击编辑"""
     if not title:
         return title
     title = title.strip()
-    if len(title) > MAX_TITLE_LEN:
-        print(f"  ⚠ 标题超长 ({len(title)} > {MAX_TITLE_LEN} 字), 截断为: {title[:MAX_TITLE_LEN]}")
-        title = title[:MAX_TITLE_LEN]
-    if len(title) < MIN_TITLE_LEN:
-        print(f"  ⚠ 标题过短 ({len(title)} < {MIN_TITLE_LEN} 字), 携程要求 5-20 字, 建议前端编辑")
+    t_len = len(title)
+    if t_len > MAX_TITLE_LEN:
+        print(f"  ⚠ 标题超长 ({t_len} > {MAX_TITLE_LEN} 字), 携程限制 5-20 字")
+    elif t_len < MIN_TITLE_LEN:
+        print(f"  ⚠ 标题过短 ({t_len} < {MIN_TITLE_LEN} 字), 携程限制 5-20 字")
     return title
 
 
