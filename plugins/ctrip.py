@@ -221,16 +221,26 @@ def _distribute_picture_text(page, context, title, content, image_paths):
     print("[3/6] 输入标题...")
     title_entered = False
 
-    # 方式A: JS 原生 setter 输入 (React 受控组件兼容, 首选)
+    # 方式A: 聚焦 Draft.js contenteditable 后用真实键盘输入 (Draft.js 依赖真实事件流更新 EditorState)
     try:
-        result = _input_js(editor_page, TITLE_XPATH, title)
-        if result.get("ok"):
-            print(f"  ✓ 已输入标题 (JS, {result.get('type','')}): {title[:50]}{'...' if len(title) > 50 else ''}")
+        ok = _type_into_contenteditable(editor_page, TITLE_XPATH, title)
+        if ok:
+            print(f"  ✓ 已输入标题 (真实键盘): {title[:50]}{'...' if len(title) > 50 else ''}")
             title_entered = True
     except Exception as e:
-        print(f"  ✗ JS 输入标题失败: {e}")
+        print(f"  ✗ 键盘输入标题失败: {e}")
 
-    # 方式B: 常规 fill/type 兜底
+    # 方式B: JS 原生 setter 输入 (React 受控组件兼容, 兜底)
+    if not title_entered:
+        try:
+            result = _input_js(editor_page, TITLE_XPATH, title)
+            if result.get("ok"):
+                print(f"  ✓ 已输入标题 (JS, {result.get('type','')}): {title[:50]}{'...' if len(title) > 50 else ''}")
+                title_entered = True
+        except Exception as e:
+            print(f"  ✗ JS 输入标题失败: {e}")
+
+    # 方式C: 常规 fill/type 兜底
     if not title_entered:
         title_locators = [
             (f'xpath={TITLE_XPATH}', TITLE_XPATH),
@@ -505,6 +515,56 @@ def _get_content_text(page):
         return ""
 
 
+def _type_into_contenteditable(page, xpath, text):
+    """
+    聚焦 contenteditable (Draft.js) 后用 Playwright 真实键盘输入
+
+    Draft.js 的 EditorState 依赖真实的 beforeinput/input 键盘事件流,
+    纯 JS 塞文本只改 DOM 不改 React 状态 (界面显示文字但携程认为"无标题")。
+    因此先 JS 聚焦元素, 再 page.keyboard.type 真实输入。
+    """
+    # 1) JS 定位并聚焦
+    focused = page.evaluate(
+        """(xpath) => {
+            let el = null;
+            try { el = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) {}
+            if (!el) {
+                el = document.querySelector('.public-DraftEditor-content[contenteditable="true"], #root [contenteditable="true"]');
+            }
+            if (el) {
+                el.focus();
+                // 移动光标到末尾
+                try {
+                    const sel = window.getSelection();
+                    const range = document.createRange();
+                    range.selectNodeContents(el);
+                    range.collapse(false);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                } catch (e) {}
+                return true;
+            }
+            return false;
+        }""",
+        xpath,
+    )
+    if not focused:
+        return False
+    time.sleep(0.3)
+    # 2) 全选清空已有内容 (真实键盘快捷键)
+    try:
+        page.keyboard.press("Control+A")
+        time.sleep(0.2)
+        page.keyboard.press("Backspace")
+        time.sleep(0.3)
+    except Exception:
+        pass
+    # 3) 真实键盘逐字符输入
+    page.keyboard.type(text, delay=30)
+    time.sleep(0.5)
+    return True
+
+
 def _input_js(page, xpath, text):
     """
     用 JS 输入文本, React/Draft.js 受控组件兼容
@@ -580,33 +640,41 @@ def _extract_address(content):
     """
     从内容中提取地址
 
-    优先匹配常见地址格式:
-    - "地址: XXX" / "地点: XXX" / "位置: XXX"
-    - 含省/市/区/路/街等关键词的句子
+    规则: 文档中前缀为 "地址：" 的, 后面的内容就是地址,
+    **遇到换行即结束** (不跨行合并)。
+    兜底: 无前缀时匹配含省/市/区/路/街的句子。
     返回提取的地址字符串, 无则返回 None。
     """
     if not content:
         return None
-    # 去 HTML 标签
-    text = re.sub(r"<[^>]+>", "", content)
-    text = re.sub(r"\s+", " ", text).strip()
+    # 先把段落/换行标签替换成换行 (必须先做, 否则标签被删后换行信息丢失)
+    text = re.sub(r"</?p[^>]*>", "\n", content)
+    text = re.sub(r"<br\s*/?>", "\n", text)
+    text = re.sub(r"</?(div|section|h[1-6]|li|tr)[^>]*>", "\n", text)
+    # 再删除其余 HTML 标签
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("\u3000", " ")
 
-    # 1) 显式标签: 地址/地点/位置
+    # 1) 显式标签: 地址/地点/位置/位于 (遇到换行/句号/分号/逗号即结束)
     for pattern in [
-        r"(?:地址|地点|位置|位于)[:：]\s*([^。；;，,\n]+)",
-        r"(?:地址|地点|位置|位于)\s+([^。；;，,\n]+)",
+        r"(?:地址|地点|位置|位于)[:：]\s*([^\n。；;，,\r]+)",
+        r"(?:地址|地点|位置|位于)\s+([^\n。；;，,\r]+)",
     ]:
         m = re.search(pattern, text)
         if m and m.group(1).strip():
             return m.group(1).strip()
 
-    # 2) 含省市区路街的句子
-    addr_kw = re.compile(
-        r"[\u4e00-\u9fa5]{2,8}(?:省|市|区|县)[\u4e00-\u9fa5]{0,8}(?:路|街|道|巷|号|大厦|广场|中心|公园|酒店|商场|园)[\u4e00-\u9fa5]{0,15}"
-    )
-    m = addr_kw.search(text)
-    if m:
-        return m.group(0).strip()
+    # 2) 兜底: 无前缀时, 从每行中匹配含省市区路街的片段
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        addr_kw = re.compile(
+            r"[\u4e00-\u9fa5]{2,8}(?:省|市|区|县)[\u4e00-\u9fa5]{0,8}(?:路|街|道|巷|号|大厦|广场|中心|公园|酒店|商场|园)[\u4e00-\u9fa5]{0,15}"
+        )
+        m = addr_kw.search(line)
+        if m:
+            return m.group(0).strip()
 
     return None
 
