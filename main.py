@@ -535,6 +535,7 @@ def _scan_ctrip_picture_text(root: Path) -> list:
                 "images": [img.name for img in images],
                 "word_file": word_files[0].name if word_files else None,
                 "title": title,
+                "title_len": len(title),  # 用于前端字数预警 (携程5-20字)
                 "content_preview": content_preview,
                 "content_len": content_len,
                 "error": error,

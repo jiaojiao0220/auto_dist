@@ -1224,16 +1224,26 @@ function renderCtripFolders() {
       <th style="width:10%;text-align:center;">选择</th>
     </tr></thead>
     <tbody>
-      ${ctripFolders.map((f, idx) => `
-        <tr class="${ctripSelected.has(f.path) ? 'ctrip-row-selected' : ''}">
-          <td class="ctrip-title-cell" ondblclick="startEditCtripTitle(this, '${idx}')" title="${escapeHtml(f.title || '')}，双击可编辑">
-            <span class="ctrip-title-text">${escapeHtml(f.custom_title || f.title || '(无标题)')}</span>
-          </td>
-          <td style="text-align:center;">${f.image_count} 张</td>
-          <td style="font-size:12px;color:var(--gray-500);max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(f.content_preview || '')}</td>
-          <td style="text-align:center;"><input type="checkbox" ${ctripSelected.has(f.path) ? 'checked' : ''} onchange="toggleCtripFolder('${idx}')"></td>
-        </tr>
-      `).join('')}
+      ${ctripFolders.map((f, idx) => {
+        const effTitle = f.custom_title || f.title || '';
+        const tLen = effTitle.length || 0;
+        const warn = tLen < 5 || tLen > 20;
+        const warnStyle = warn ? 'color:var(--danger);font-weight:600;' : '';
+        const warnIcon = warn ? (tLen < 5 ? ' 🔻' : ' 🔺') : '';
+        const warnMsg = warn ? (' ⚠ 仅' + tLen + '字，不足5字') : '';
+        const warnMsg2 = warn ? (' ⚠ ' + tLen + '字，超过20字限制') : '';
+        const warnHtml = warn ? ('<span style=\"font-size:11px;color:var(--danger);\">' + (tLen < 5 ? warnMsg : warnMsg2) + '</span>') : '';
+        return '' +
+        '<tr class="' + (ctripSelected.has(f.path) ? 'ctrip-row-selected' : '') + '">' +
+          '<td class="ctrip-title-cell" ondblclick="startEditCtripTitle(this, \'' + idx + '\')" title="' + escapeHtml(effTitle || '双击编辑') + '">' +
+            '<span class="ctrip-title-text" style="' + warnStyle + '">' + escapeHtml(effTitle || '(无标题)') + warnIcon + '</span>' +
+            warnHtml +
+          '</td>' +
+          '<td style="text-align:center;">' + f.image_count + ' 张</td>' +
+          '<td style="font-size:12px;color:var(--gray-500);max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(f.content_preview || '') + '</td>' +
+          '<td style="text-align:center;"><input type="checkbox" ' + (ctripSelected.has(f.path) ? 'checked' : '') + ' onchange="toggleCtripFolder(\'' + idx + '\')"></td>' +
+        '</tr>';
+      }).join('')}
     </tbody>
   </table>`;
 }
@@ -1259,14 +1269,8 @@ function finishEditCtripTitle(cell, idx, newTitle) {
   if (!f) return;
   newTitle = (newTitle || '').trim();
   f.custom_title = newTitle;
-  // 恢复 span
-  const input = cell.querySelector('input');
-  if (input) {
-    const span = document.createElement('span');
-    span.className = 'ctrip-title-text';
-    span.textContent = newTitle || f.title || '(无标题)';
-    input.replaceWith(span);
-  }
+  // 重渲染表格 (更新警告标记: 字数超限/不足)
+  renderCtripFolders();
 }
 
 function toggleCtripFolder(idx) {
