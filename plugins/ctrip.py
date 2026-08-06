@@ -29,7 +29,10 @@ VIDEO_URL = "https://we.ctrip.com/publish/publishVideo"  # 视频发布页 (预�
 
 # 用户提供的精确 XPath
 UPLOAD_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[3]/div/div/span/div/span/div'
-TITLE_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[4]/div[2]/div/div[2]/div/div/div/div'
+# 标题区域: 用户给的容器 XPath 是 div[4], 但真正可输入的是其中 Draft.js 的 contenteditable 元素
+TITLE_CONTAINER_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[4]'
+# Draft.js contenteditable 根元素 (输入必须作用于它, div[4]/div[2]/div[1]/div[2]/div[1])
+TITLE_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[4]/div[2]/div[1]/div[2]/div[1]'
 CONTENT_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[5]/div[3]/div/div[2]/div'
 ADDRESS_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[9]/div/div'
 PUBLISH_XPATH = '//*[@id="root"]/section/section/main/div/div/div/div[1]/div[14]/div/button[2]/span'
@@ -504,10 +507,11 @@ def _get_content_text(page):
 
 def _input_js(page, xpath, text):
     """
-    用 JS 输入文本, React 受控组件兼容
+    用 JS 输入文本, React/Draft.js 受控组件兼容
 
     - input/textarea: 原生 value setter + input/change 事件 (绕过 React 值劫持)
-    - contenteditable: focus + execCommand insertText (触发 input 事件, 编辑器可识别)
+    - contenteditable (Draft.js): focus 后先清空, 再逐字符 execCommand insertText
+      (Draft.js 依赖编辑器状态机, 需真实输入事件驱动)
     返回 {"ok": bool, "type": 元素类型, "value": 输入后值}
     """
     return page.evaluate(
@@ -538,14 +542,35 @@ def _input_js(page, xpath, text):
                 return {ok: true, type: el.tagName, value: el.value};
             }
 
-            // contenteditable
-            el.textContent = '';
+            // contenteditable (Draft.js 等): 清空后逐字符 execCommand insertText
             const sel = window.getSelection();
-            sel.selectAllChildren(el);
-            document.execCommand('delete', false, null);
-            document.execCommand('insertText', false, text);
+            el.focus();
+            // 移动到末尾
+            try {
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                range.collapse(false); // 折叠到末尾
+                sel.removeAllRanges();
+                sel.addRange(range);
+            } catch (e) {}
+            // 清空已有内容 (全选后删除)
+            try {
+                const r = document.createRange();
+                r.selectNodeContents(el);
+                sel.removeAllRanges();
+                sel.addRange(r);
+                document.execCommand('delete', false, null);
+            } catch (e) {}
+            // 逐字符插入 (Draft.js 需要每次 insertText 后重设 selection 到末尾)
+            let ok = false;
+            for (let i = 0; i < text.length; i++) {
+                try {
+                    document.execCommand('insertText', false, text[i]);
+                    ok = true;
+                } catch (e) { break; }
+            }
             el.dispatchEvent(new Event('input', {bubbles: true}));
-            return {ok: true, type: 'contenteditable', value: el.innerText || ''};
+            return {ok: ok, type: 'contenteditable', value: el.innerText || ''};
         }""",
         {"xpath": xpath, "text": text},
     )
